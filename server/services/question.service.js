@@ -108,6 +108,17 @@ const buildQuestionUpdate = (data) => {
 // =====================================
 
 const safeTranslateQuestionToHindi = async (questionData) => {
+    // Never call an external translation service during Jest tests.
+  if (process.env.NODE_ENV === "test") {
+    return {
+      questionHindi: "",
+      optionAHindi: "",
+      optionBHindi: "",
+      optionCHindi: "",
+      optionDHindi: "",
+      explanationHindi: "",
+    };
+  }
   try {
     return await translateQuestionToHindi(questionData);
   } catch (error) {
