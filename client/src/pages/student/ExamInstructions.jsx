@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -20,6 +20,8 @@ const ExamInstructions = () => {
 
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [materials, setMaterials] = useState([]);
+  const [materialsError, setMaterialsError] = useState("");
 
   // ======================================
   // EXAM LANGUAGE
@@ -182,6 +184,35 @@ const text = isHindi
       starting:
         "Starting...",
     };
+  useEffect(() => {
+    let mounted = true;
+
+    const loadMaterials = async () => {
+      if (!exam?._id) return;
+
+      try {
+        const response = await studentExamService.getMaterials(exam._id);
+        if (mounted) {
+          setMaterials(response?.data?.materials || []);
+          setMaterialsError("");
+        }
+      } catch (error) {
+        if (mounted && exam?.isPaid && exam?.isPurchased) {
+          setMaterialsError(
+            error?.response?.data?.message ||
+              "Study materials could not be loaded."
+          );
+        }
+      }
+    };
+
+    loadMaterials();
+
+    return () => {
+      mounted = false;
+    };
+  }, [exam?._id, exam?.isPaid, exam?.isPurchased]);
+
   // ======================================
   // START EXAM
   // ======================================
@@ -355,6 +386,51 @@ const text = isHindi
           </div>
         </div>
       </div>
+
+      {/* Study Materials */}
+
+      {(materials.length > 0 || materialsError) && (
+        <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="mb-5">
+            <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-100">
+              Study Materials
+            </h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              PDFs shared for this exam.
+            </p>
+          </div>
+
+          {materialsError ? (
+            <p className="text-sm text-red-600">{materialsError}</p>
+          ) : (
+            <div className="space-y-3">
+              {materials.map((material) => (
+                <a
+                  key={material._id}
+                  href={material.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 p-4 transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-800 dark:text-slate-100">
+                      {material.title}
+                    </p>
+                    {material.description && (
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        {material.description}
+                      </p>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold text-blue-600">
+                    View PDF
+                  </span>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Language Selection */}
 

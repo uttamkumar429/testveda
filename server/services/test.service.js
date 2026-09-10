@@ -166,6 +166,22 @@ const createTest = async (testData) => {
     testData.questions
   );
 
+  const normalizedIsPaid = Boolean(testData.isPaid);
+  const normalizedPrice = normalizedIsPaid
+    ? Number(testData.price ?? 0)
+    : 0;
+
+  if (
+    normalizedIsPaid &&
+    (!Number.isFinite(normalizedPrice) ||
+      normalizedPrice <= 0)
+  ) {
+    throw new ApiError(
+      400,
+      "Paid tests must have a price greater than 0."
+    );
+  }
+
 // =====================================
 // CREATE TEST
 // =====================================
@@ -176,6 +192,10 @@ const test = await Test.create({
 
   description:
     testData.description?.trim() || "",
+
+  isPaid: normalizedIsPaid,
+
+  price: normalizedPrice,
 
   duration: Number(testData.duration),
 
@@ -335,6 +355,8 @@ const getAllTests = async (
         startTime
         endTime
         status
+        isPaid
+        price
         createdAt
         createdBy
         questions
@@ -413,6 +435,9 @@ const getTestById = async (id) => {
       totalMarks
       totalQuestions
       status
+      isPaid
+      price
+      materials
       startTime
       endTime
       createdAt
@@ -478,6 +503,26 @@ const updateTest = async (id, data) => {
     );
   }
 
+  const normalizedUpdateIsPaid =
+    data.isPaid !== undefined
+      ? Boolean(data.isPaid)
+      : Boolean(test.isPaid);
+
+  const normalizedUpdatePrice = normalizedUpdateIsPaid
+    ? Number(data.price ?? test.price ?? 0)
+    : 0;
+
+  if (
+    normalizedUpdateIsPaid &&
+    (!Number.isFinite(normalizedUpdatePrice) ||
+      normalizedUpdatePrice <= 0)
+  ) {
+    throw new ApiError(
+      400,
+      "Paid tests must have a price greater than 0."
+    );
+  }
+
   // =====================================
 // CHECK DUPLICATE TITLE
 // =====================================
@@ -516,6 +561,10 @@ const updateData = {
   description:
     data.description?.trim() ??
     test.description,
+
+  isPaid: normalizedUpdateIsPaid,
+
+  price: normalizedUpdatePrice,
 
   duration:
       data.duration !== undefined
@@ -671,26 +720,32 @@ const publishTest = async (id) => {
     // CREATE QUESTION SNAPSHOT
     // =====================================
 
-    const snapshot = await TestSnapshot.create(
-      [
-        {
-          testId: test._id,
+      const snapshot = await TestSnapshot.create(
+        [
+          {
+            testId: test._id,
 
-          title: test.title,
+            title: test.title,
 
-          subject: test.subject,
+            subject: test.subject,
 
-          duration: test.duration,
+            isPaid: test.isPaid,
 
-          totalMarks: test.totalMarks,
+            price: test.price,
 
-          totalQuestions: test.totalQuestions,
+            materials: test.materials,
 
-          startTime: test.startTime,
+            duration: test.duration,
 
-          endTime: test.endTime,
+            totalMarks: test.totalMarks,
 
-          questions: test.questions.map((question) => ({
+            totalQuestions: test.totalQuestions,
+
+            startTime: test.startTime,
+
+            endTime: test.endTime,
+
+            questions: test.questions.map((question) => ({
             questionId: question._id,
 
             subject: question.subject,

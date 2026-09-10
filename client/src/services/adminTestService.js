@@ -70,6 +70,32 @@ const adminTestService = {
   },
 
   // =========================================
+  // TEST MATERIALS
+  // =========================================
+
+  uploadMaterial: async (id, formData) => {
+    const response = await api.post(
+      `/tests/${id}/materials`,
+      formData,
+      {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      }
+    );
+
+    return response.data;
+  },
+
+  deleteMaterial: async (id, materialId) => {
+    const response = await api.delete(
+      `/tests/${id}/materials/${materialId}`
+    );
+
+    return response.data;
+  },
+
+  // =========================================
   // PUBLISH TEST
   // =========================================
 

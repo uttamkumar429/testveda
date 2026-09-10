@@ -9,6 +9,7 @@ import TestDetailsCard from "../../components/tests/TestDetailsCard";
 import TestQuestionList from "../../components/tests/TestQuestionList";
 import TestDetailsActions from "../../components/tests/TestDetailsActions";
 
+
 import {
   fetchTestById,
   deleteTest,
@@ -86,6 +87,10 @@ function TestDetails() {
   // ===============================
   // Delete
   // ===============================
+
+  // const refreshTest = async () => {
+  //   await dispatch(fetchTestById(id)).unwrap();
+  // };
 
   const handleDelete = async () => {
     const confirmDelete = window.confirm(

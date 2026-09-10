@@ -536,25 +536,22 @@ test(
       )
     );
 
-    expect(
-      mockSaveAnswer
-    ).toHaveBeenCalledWith({
-      attemptId:
-        "attempt-123",
+    await waitFor(() => {
+      expect(
+        mockSaveAnswer
+      ).toHaveBeenCalledWith({
+        attemptId: "attempt-123",
 
-      payload: {
-        questionId:
-          "q1",
+        payload: {
+          questionId: "q1",
 
-        selectedAnswer:
-          "A",
+          selectedAnswer: "A",
 
-        currentQuestionIndex:
-          0,
+          currentQuestionIndex: 0,
 
-        timeSpent:
-          expect.any(Number),
-      },
+          timeSpent: expect.any(Number),
+        },
+      });
     });
 
     expect(

@@ -2,6 +2,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   BookOpen,
+  FileText,
   Trophy,
   User,
   Settings,
@@ -18,6 +19,11 @@ const STUDENT_MENUS = [
     name: "Available Exams",
     icon: BookOpen,
     path: "/student/exams",
+  },
+  {
+    name: "Study Material",
+    icon: FileText,
+    path: "/student/study-materials",
   },
   {
     name: "Results",

@@ -1,6 +1,10 @@
 const mongoose = require("mongoose");
 const ExamAttempt = require("../models/ExamAttempt");
 const TestSnapshot = require("../models/TestSnapshot");
+const {
+  getStudentAccessStatus,
+  canAccessPremiumContent,
+} = require("./access.service");
 const StudentAnswer = require("../models/StudentAnswer");
 const ApiError = require("../utils/ApiError");
 const {
@@ -90,7 +94,7 @@ const getDashboard = async (studentId) => {
   ] = await Promise.all([
     TestSnapshot.find(upcomingQuery)
       .select(
-        "_id title subject duration totalMarks totalQuestions startTime endTime"
+        "_id title subject duration totalMarks totalQuestions startTime endTime isPaid price"
       )
       .sort({ startTime: 1 })
       .limit(5)
@@ -98,7 +102,7 @@ const getDashboard = async (studentId) => {
 
     TestSnapshot.find(activeQuery)
       .select(
-        "_id title subject duration totalMarks totalQuestions startTime endTime"
+        "_id title subject duration totalMarks totalQuestions startTime endTime isPaid price"
       )
       .sort({ startTime: 1 })
       .limit(5)
@@ -278,7 +282,7 @@ const getAvailableExams = async (studentId) => {
   const exams =
     await TestSnapshot.find(query)
       .select(
-        "_id title subject duration totalMarks totalQuestions startTime endTime"
+        "_id title subject duration totalMarks totalQuestions startTime endTime isPaid price"
       )
       .sort({
         startTime: 1,
@@ -289,14 +293,46 @@ const getAvailableExams = async (studentId) => {
   // 5. Add Exam Status
   // ----------------------------------------
 
-  return exams.map((exam) => ({
+const accessStatus = await getStudentAccessStatus(studentId);
+
+const examsWithAccess = exams.map((exam) => {
+  const isFree = !exam.isPaid;
+
+  const isPurchased =
+    isFree ||
+    accessStatus.premiumAccess;
+
+  return {
     ...exam,
 
     status:
       exam.startTime <= now
         ? "ACTIVE"
         : "UPCOMING",
-  }));
+
+    isPurchased,
+
+    accessStatus: isFree
+      ? "FREE"
+      : accessStatus.trial.active
+        ? "TRIAL"
+        : accessStatus.subscription
+          ? "SUBSCRIPTION"
+          : "SUBSCRIPTION_REQUIRED",
+
+    trialActive: accessStatus.trial.active,
+
+    trialEndDate: accessStatus.trial.trialEndDate,
+
+    subscriptionActive:
+      Boolean(accessStatus.subscription),
+
+    subscriptionEndDate:
+      accessStatus.subscription?.endDate || null,
+  };
+});
+
+return examsWithAccess;
 };
 // ======================================
 // START EXAM
@@ -328,7 +364,7 @@ const startExam = async (studentId, snapshotId) => {
   const snapshot =
     await TestSnapshot.findById(snapshotId)
       .select(
-        "_id title subject startTime endTime duration totalQuestions totalMarks questions"
+        "_id title subject startTime endTime duration totalQuestions totalMarks questions isPaid price materials"
       )
       .lean();
 
@@ -363,6 +399,18 @@ const startExam = async (studentId, snapshotId) => {
       "This exam has no questions."
     );
   }
+
+  // Paid exams require a verified purchase before an attempt can begin.
+if (snapshot.isPaid) {
+  const access = await getStudentAccessStatus(studentId);
+
+  if (!access.premiumAccess) {
+    throw new ApiError(
+      403,
+      "Your free trial has ended. Please subscribe to continue."
+    );
+  }
+}
 
   // --------------------------------------
   // 4. Validate Snapshot Time Configuration
@@ -1198,7 +1246,7 @@ const safeTimeSpent = Math.max(
         },
       },
       {
-        new: true,
+        returnDocument: "after",
         upsert: true,
         runValidators: true,
         setDefaultsOnInsert: true,
@@ -1844,7 +1892,7 @@ const submittedAttempt =
       },
     },
     {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
     }
   );

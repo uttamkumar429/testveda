@@ -30,6 +30,8 @@ const getInitialFormData = (initialValues) => ({
   subject: initialValues?.subject || "",
   description:
     initialValues?.description || "",
+  isPaid: Boolean(initialValues?.isPaid),
+  price: initialValues?.price ?? "",
   duration:
     initialValues?.duration || "",
   startTime: formatDateTimeLocal(
@@ -234,6 +236,19 @@ function TestForm({
     }
 
     // --------------------------------
+    // Price
+    // --------------------------------
+
+    if (formData.isPaid) {
+      const price = Number(formData.price);
+
+      if (!Number.isFinite(price) || price <= 0) {
+        errors.price =
+          "Price must be greater than 0 for a paid test.";
+      }
+    }
+
+    // --------------------------------
     // Questions
     // --------------------------------
 
@@ -280,6 +295,12 @@ function TestForm({
     subject: formData.subject.trim(),
 
     description: formData.description.trim(),
+
+    isPaid: Boolean(formData.isPaid),
+
+    price: formData.isPaid
+      ? Number(formData.price)
+      : 0,
 
     duration: Number(formData.duration),
 
@@ -423,6 +444,56 @@ function TestForm({
           className="w-full rounded-lg border px-4 py-3"
         />
 
+      </div>
+
+      {/* ===========================
+          Access / Price
+      =========================== */}
+
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+        <label className="flex items-center gap-3 font-medium text-slate-800">
+          <input
+            type="checkbox"
+            name="isPaid"
+            checked={Boolean(formData.isPaid)}
+            onChange={(e) =>
+              setFormData((prev) => ({
+                ...prev,
+                isPaid: e.target.checked,
+                price: e.target.checked ? prev.price : "",
+              }))
+            }
+            className="h-5 w-5 accent-blue-600"
+          />
+          Paid Test
+        </label>
+
+        <p className="mt-2 text-sm text-slate-500">
+          Students must complete payment before starting this exam.
+        </p>
+
+        {formData.isPaid && (
+          <div className="mt-4 max-w-xs">
+            <label className="mb-2 block font-medium">
+              Price (₹)
+            </label>
+            <input
+              type="number"
+              min="1"
+              step="0.01"
+              name="price"
+              value={formData.price}
+              onChange={handleChange}
+              placeholder="20"
+              className="w-full rounded-lg border px-4 py-3"
+            />
+            {formErrors.price && (
+              <p className="mt-2 text-sm text-red-600">
+                {formErrors.price}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ===========================

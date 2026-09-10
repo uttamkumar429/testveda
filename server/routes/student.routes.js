@@ -265,6 +265,12 @@ router.get(
   authorize("student"),
   studentController.getAvailableExams
 );
+router.get(
+  "/exams/:snapshotId/materials",
+  protect,
+  authorize("student"),
+  require("../controllers/testMaterial.controller").getStudentMaterials
+);
 // =====================================
 // REVIEW ANSWERS
 // =====================================

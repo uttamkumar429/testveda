@@ -21,6 +21,29 @@ const testSchema = new mongoose.Schema(
       trim: true,
     },
 
+    isPaid: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    price: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    materials: [
+      {
+        title: { type: String, required: true, trim: true },
+        description: { type: String, default: "", trim: true },
+        url: { type: String, required: true },
+        publicId: { type: String, required: true },
+        originalName: { type: String, default: "" },
+        resourceType: { type: String, default: "raw" },
+      },
+    ],
+
     duration: {
       type: Number,
       required: true,

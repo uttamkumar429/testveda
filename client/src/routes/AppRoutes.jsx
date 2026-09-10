@@ -31,6 +31,10 @@ import ResultHistory from "../pages/student/ResultHistory";
 import ExamPage from "../pages/student/ExamPage";
 import ReviewAnswersPage from "../pages/student/ReviewAnswersPage";
 import RoleProtectedRoute from "./RoleProtectedRoute";
+import StudentStudyMaterials from "../pages/student/StudyMaterials";
+import StudyMaterialViewer from "../pages/student/StudyMaterialViewer";
+import AdminStudyMaterials from "../pages/admin/StudyMaterials";
+import SubscriptionPage from "../pages/student/SubscriptionPage";
 
 function AppRoutes() {
     
@@ -117,6 +121,14 @@ function AppRoutes() {
             element={
                 <RoleProtectedRoute allowedRoles={["admin"]}>
                 <EditTest />
+                </RoleProtectedRoute>
+            }
+        />
+        <Route
+            path="/admin/study-materials"
+            element={
+                <RoleProtectedRoute allowedRoles={["admin", "superAdmin"]}>
+                <AdminStudyMaterials />
                 </RoleProtectedRoute>
             }
         />
@@ -214,6 +226,15 @@ function AppRoutes() {
                     path="notifications"
                     element={<Notifications />}
                 />
+                <Route
+                    path="study-materials"
+                    element={<StudentStudyMaterials />}
+                />
+
+                <Route
+                    path="study-materials/:id"
+                    element={<StudyMaterialViewer />}
+                />
 
                 <Route path="exams" element={<StudentExams />} />
 
@@ -225,6 +246,10 @@ function AppRoutes() {
                 <Route
                     path="exam/:attemptId"
                     element={<ExamPage />}
+                />
+                <Route
+                    path="subscription"
+                    element={<SubscriptionPage />}
                 />
 
                 <Route

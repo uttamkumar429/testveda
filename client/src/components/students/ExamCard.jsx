@@ -37,7 +37,24 @@ const formatTime = (date) => {
   });
 };
 
-function ExamCard({ exam, onStart }) {
+function ExamCard({ exam, onStart, paymentLoading = false }) {
+  const isPaid = Boolean(exam.isPaid);
+
+  const hasPremiumAccess =
+    !isPaid ||
+    Boolean(exam.trialActive) ||
+    Boolean(exam.subscriptionActive);
+
+  const canSubscribe =
+    isPaid && !hasPremiumAccess;
+
+  const canStart =
+    exam.status === "ACTIVE" &&
+    hasPremiumAccess;
+
+  const disabled =
+    paymentLoading ||
+    (!canSubscribe && !canStart);
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl dark:border-slate-700 dark:bg-slate-800">
       {/* Header */}
@@ -117,6 +134,24 @@ function ExamCard({ exam, onStart }) {
           </span>
         </div>
 
+        {/* Price */}
+
+        <div className="flex items-center justify-between">
+          <span className="text-slate-500 dark:text-slate-400">
+            Access
+          </span>
+
+          <span className="font-semibold text-slate-800 dark:text-slate-100">
+            {!exam.isPaid
+              ? "Free"
+              : exam.trialActive
+                ? "Included in Free Trial"
+                : exam.subscriptionActive
+                  ? "Included in Subscription"
+                  : `Premium`}
+          </span>
+        </div>
+
         {/* Date */}
 
         <div className="flex items-center justify-between">
@@ -151,19 +186,25 @@ function ExamCard({ exam, onStart }) {
 
       <button
         type="button"
-        disabled={exam.status !== "ACTIVE"}
+        disabled={disabled}
         onClick={() => onStart(exam)}
         className={`mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl py-3 font-semibold text-white transition ${
-          exam.status === "ACTIVE"
+          canSubscribe || canStart
             ? "bg-blue-600 hover:bg-blue-700"
             : "cursor-not-allowed bg-slate-400 dark:bg-slate-600"
         }`}
       >
         <PlayCircle size={18} />
 
-        {exam.status === "ACTIVE"
-          ? "Start Exam"
-          : "Not Started Yet"}
+          {paymentLoading
+            ? "Processing..."
+            : canSubscribe
+              ? "Subscribe Now"
+              : canStart
+                ? "Start Exam"
+                : exam.status === "UPCOMING"
+                  ? "Starts Later"
+                  : "Subscription Required"}
       </button>
     </div>
   );

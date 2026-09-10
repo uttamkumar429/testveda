@@ -30,6 +30,18 @@ const publishTest = async (testId) => {
     throw new Error("Only draft tests can be published.");
   }
 
+  // Paid tests must have a valid price before a snapshot is created.
+  if (
+    test.isPaid &&
+    (!Number.isFinite(Number(test.price)) ||
+      Number(test.price) <= 0)
+  ) {
+    throw new ApiError(
+      400,
+      "Paid tests must have a price greater than 0."
+    );
+  }
+
   // Check Snapshot Already Exists
   const existingSnapshot = await TestSnapshot.findOne({
     testId,
@@ -50,6 +62,19 @@ const publishTest = async (testId) => {
     title: test.title,
 
     subject: test.subject,
+
+    isPaid: Boolean(test.isPaid),
+
+    price: Number(test.isPaid ? test.price : 0),
+
+    materials: (test.materials || []).map((material) => ({
+      title: material.title,
+      description: material.description,
+      url: material.url,
+      publicId: material.publicId,
+      originalName: material.originalName,
+      resourceType: material.resourceType || "raw",
+    })),
 
     duration: test.duration,
 

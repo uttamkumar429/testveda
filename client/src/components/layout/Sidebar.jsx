@@ -46,6 +46,11 @@ function Sidebar() {
       path: "/admin/tests",
     },
     {
+      title: "Study Materials",
+      icon: FileText,
+      path: "/admin/study-materials",
+    },
+    {
       title: "Results", 
       icon: FileText, 
       path: "/admin/results", 

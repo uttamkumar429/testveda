@@ -44,7 +44,13 @@ const studentExamRoutes = require("./routes/studentExam.routes");
 const adminRoutes = require("./routes/admin.routes");
 const systemSettingRoutes =
   require("./routes/systemSetting.routes");
+const paymentRoutes = require("./routes/payment.routes");
+const testMaterialRoutes = require("./routes/testMaterial.routes");
+const adminStudyMaterialRoutes =
+  require("./routes/adminStudyMaterial.routes");
 
+const studentStudyMaterialRoutes =
+  require("./routes/studentStudyMaterial.routes");
 // =========================
 // =========================
 // Global Middleware
@@ -136,9 +142,19 @@ app.use("/api/tests", testRoutes);
 
 // Publish Test
 app.use("/api/tests", publishRoutes);
+app.use("/api/tests", testMaterialRoutes);
+app.use(
+  "/api/admin/study-materials",
+  adminStudyMaterialRoutes
+);
 
+app.use(
+  "/api/student/study-materials",
+  studentStudyMaterialRoutes
+);
 // Student APIs
 app.use("/api/student", studentRoutes);
+app.use("/api/student/payments", paymentRoutes);
 app.use(
   "/api/student/settings",
   notificationPreferenceRoutes

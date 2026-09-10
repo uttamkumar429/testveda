@@ -15,6 +15,8 @@ const validateCreateTest = (data) => {
     startTime,
     endTime,
     questions,
+    isPaid,
+    price,
   } = data;
 
   // =========================
@@ -112,6 +114,18 @@ const validateCreateTest = (data) => {
       errors.push(
         "End time must be greater than start time."
       );
+    }
+  }
+
+  // =========================
+  // Paid Test
+  // =========================
+
+  if (isPaid === true) {
+    const numericPrice = Number(price);
+
+    if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+      errors.push("Paid tests must have a price greater than 0.");
     }
   }
 

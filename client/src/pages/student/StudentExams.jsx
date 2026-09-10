@@ -1,10 +1,42 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
+import { toast } from "sonner";
 
 import ExamCard from "../../components/students/ExamCard";
 
 import { fetchAvailableExams } from "../../redux/studentExam/examThunk";
+import paymentService from "../../services/paymentService";
+
+const RAZORPAY_SCRIPT_URL =
+  "https://checkout.razorpay.com/v1/checkout.js";
+
+const loadRazorpay = () =>
+  new Promise((resolve, reject) => {
+    if (window.Razorpay) {
+      resolve(true);
+      return;
+    }
+
+    const existing = document.querySelector(
+      `script[src="${RAZORPAY_SCRIPT_URL}"]`
+    );
+
+    if (existing) {
+      existing.addEventListener("load", () => resolve(true), { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = RAZORPAY_SCRIPT_URL;
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () =>
+      reject(new Error("Unable to load payment checkout."));
+    document.body.appendChild(script);
+  });
+
 import {
   selectAvailableExams,
   selectExamLoading,
@@ -18,15 +50,99 @@ function StudentExams() {
   const exams = useSelector(selectAvailableExams);
   const loading = useSelector(selectExamLoading);
   const error = useSelector(selectExamError);
+  const [paymentExamId, setPaymentExamId] = useState(null);
 
   useEffect(() => {
     dispatch(fetchAvailableExams());
   }, [dispatch]);
 
-  const handleStartExam = (exam) => {
-    navigate("/student/exam/instructions", {
-      state: { exam },
-    });
+  const handleStartExam = async (exam) => {
+    if (!exam?._id) return;
+
+    // Free exams can be opened only after their scheduled start time.
+    if (!exam.isPaid) {
+      if (exam.status !== "ACTIVE") return;
+
+      navigate("/student/exam/instructions", {
+        state: { exam },
+      });
+      return;
+    }
+
+    // A purchased paid exam still waits for its scheduled start time.
+    if (exam.isPurchased) {
+      if (exam.status !== "ACTIVE") return;
+
+      navigate("/student/exam/instructions", {
+        state: { exam },
+      });
+      return;
+    }
+
+    if (paymentExamId) return;
+
+    try {
+      setPaymentExamId(exam._id);
+      await loadRazorpay();
+
+      const response = await paymentService.createOrder(exam._id);
+      const data = response?.data;
+
+      if (data?.alreadyPaid) {
+        navigate("/student/exam/instructions", { state: { exam: { ...exam, isPurchased: true } } });
+        return;
+      }
+
+      if (!data?.keyId || !data?.orderId) {
+        throw new Error("Payment order could not be created.");
+      }
+
+      await new Promise((resolve, reject) => {
+        const checkout = new window.Razorpay({
+          key: data.keyId,
+          amount: data.amount,
+          currency: data.currency || "INR",
+          name: "TestVeda",
+          description: exam.title,
+          order_id: data.orderId,
+          handler: async (paymentResponse) => {
+            try {
+              await paymentService.verify({
+                snapshotId: exam._id,
+                razorpay_order_id: paymentResponse.razorpay_order_id,
+                razorpay_payment_id: paymentResponse.razorpay_payment_id,
+                razorpay_signature: paymentResponse.razorpay_signature,
+              });
+              resolve();
+            } catch (verificationError) {
+              reject(verificationError);
+            }
+          },
+          modal: {
+            ondismiss: () => reject(new Error("Payment was cancelled.")),
+          },
+          theme: { color: "#2563eb" },
+        });
+
+        checkout.on("payment.failed", () =>
+          reject(new Error("Payment failed. Please try again."))
+        );
+        checkout.open();
+      });
+
+      toast.success("Payment successful. Test unlocked.");
+      navigate("/student/exam/instructions", {
+        state: { exam: { ...exam, isPurchased: true } },
+      });
+    } catch (paymentError) {
+      toast.error(
+        paymentError?.response?.data?.message ||
+          paymentError?.message ||
+          "Payment could not be completed."
+      );
+    } finally {
+      setPaymentExamId(null);
+    }
   };
 
   if (loading) {
@@ -109,6 +225,7 @@ function StudentExams() {
               key={exam._id}
               exam={exam}
               onStart={handleStartExam}
+              paymentLoading={paymentExamId === exam._id}
             />
           ))}
 
