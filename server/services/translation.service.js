@@ -13,7 +13,7 @@ const MAX_RETRIES = Number(
 );
 
 const RETRY_DELAY = Number(
-  process.env.TRANSLATION_RETRY_DELAY_MS || 1500
+  process.env.TRANSLATION_RETRY_DELAY_MS || 5000
 );
 
 const FIELD_MARKERS = {
