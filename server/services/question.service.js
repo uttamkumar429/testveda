@@ -107,8 +107,10 @@ const buildQuestionUpdate = (data) => {
 // SAFE HINDI TRANSLATION
 // =====================================
 
-const safeTranslateQuestionToHindi = async (questionData) => {
-    // Never call an external translation service during Jest tests.
+const safeTranslateQuestionToHindi = async (
+  questionData
+) => {
+  // Never call external translation service during Jest tests.
   if (process.env.NODE_ENV === "test") {
     return {
       questionHindi: "",
@@ -119,22 +121,13 @@ const safeTranslateQuestionToHindi = async (questionData) => {
       explanationHindi: "",
     };
   }
-  try {
-    return await translateQuestionToHindi(questionData);
-  } catch (error) {
-    console.warn(
-      `Hindi translation unavailable. Continuing without translation: ${error.message}`
-    );
 
-    return {
-      questionHindi: "",
-      optionAHindi: "",
-      optionBHindi: "",
-      optionCHindi: "",
-      optionDHindi: "",
-      explanationHindi: "",
-    };
-  }
+  // In production, translation failure must
+  // fail the request instead of silently saving
+  // an English-only question.
+  return await translateQuestionToHindi(
+    questionData
+  );
 };
 
 // =====================================
