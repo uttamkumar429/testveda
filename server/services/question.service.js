@@ -110,7 +110,7 @@ const buildQuestionUpdate = (data) => {
 const safeTranslateQuestionToHindi = async (
   questionData
 ) => {
-  // Never call external translation service during Jest tests.
+  // Tests must not call the external service.
   if (process.env.NODE_ENV === "test") {
     return {
       questionHindi: "",
@@ -122,8 +122,7 @@ const safeTranslateQuestionToHindi = async (
     };
   }
 
-  // In production, translation failure must
-  // fail the request instead of silently saving
+  // Production must not silently save
   // an English-only question.
   return await translateQuestionToHindi(
     questionData

@@ -9,26 +9,45 @@ const TRANSLATION_TIMEOUT = Number(
 );
 
 const MAX_RETRIES = Number(
-  process.env.TRANSLATION_MAX_RETRIES || 2
+  process.env.TRANSLATION_MAX_RETRIES || 3
 );
 
 const RETRY_DELAY = Number(
   process.env.TRANSLATION_RETRY_DELAY_MS || 5000
 );
 
-const FIELD_MARKERS = {
-  question: "[[QUESTION]]",
-  optionA: "[[OPTION_A]]",
-  optionB: "[[OPTION_B]]",
-  optionC: "[[OPTION_C]]",
-  optionD: "[[OPTION_D]]",
-  explanation: "[[EXPLANATION]]",
+// =====================================
+// HTML HELPERS
+// =====================================
+
+const escapeHtml = (value) => {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 };
 
-const delay = (ms) =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const decodeHtml = (value) => {
+  return String(value ?? "")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .trim();
+};
 
-const requestTranslation = async (text, target = "hi") => {
+// =====================================
+// REQUEST
+// =====================================
+
+const requestTranslation = async (
+  html,
+  target = "hi"
+) => {
   const controller = new AbortController();
 
   const timeoutId = setTimeout(() => {
@@ -36,22 +55,47 @@ const requestTranslation = async (text, target = "hi") => {
   }, TRANSLATION_TIMEOUT);
 
   try {
-    const response = await fetch(TRANSLATE_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        q: text,
-        source: "en",
-        target,
-        format: "text",
-      }),
-      signal: controller.signal,
-    });
+    const response = await fetch(
+      TRANSLATE_URL,
+      {
+        method: "POST",
 
-    const responseText = await response.text();
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+
+        body: JSON.stringify({
+          q: html,
+          source: "en",
+          target,
+          format: "html",
+        }),
+
+        signal: controller.signal,
+      }
+    );
+
+    const responseText =
+      await response.text();
+
+    if (response.status === 429) {
+      const retryAfter =
+        response.headers.get("retry-after");
+
+      const error = new Error(
+        `Translation service rate limited the request (429)${
+          retryAfter
+            ? `. Retry-After: ${retryAfter}`
+            : ""
+        }`
+      );
+
+      error.status = 429;
+      error.retryAfter = retryAfter;
+
+      throw error;
+    }
 
     if (!response.ok) {
       throw new Error(
@@ -77,7 +121,8 @@ const requestTranslation = async (text, target = "hi") => {
 
     if (
       !data ||
-      typeof data.translatedText !== "string" ||
+      typeof data.translatedText !==
+        "string" ||
       !data.translatedText.trim()
     ) {
       throw new Error(
@@ -91,8 +136,12 @@ const requestTranslation = async (text, target = "hi") => {
   }
 };
 
-const translateCombinedText = async (
-  text,
+// =====================================
+// RETRY
+// =====================================
+
+const translateHtml = async (
+  html,
   target = "hi"
 ) => {
   let lastError;
@@ -103,80 +152,150 @@ const translateCombinedText = async (
     attempt += 1
   ) {
     try {
-      return await requestTranslation(text, target);
+      return await requestTranslation(
+        html,
+        target
+      );
     } catch (error) {
       lastError = error;
 
       console.warn(
-        `Translation failed (attempt ${attempt}/${MAX_RETRIES}): ${error.message}`
+        `Translation attempt ${attempt}/${MAX_RETRIES} failed: ${error.message}`
       );
 
-      if (attempt < MAX_RETRIES) {
-        await delay(RETRY_DELAY * attempt);
+      if (
+        attempt >= MAX_RETRIES
+      ) {
+        break;
       }
+
+      let waitTime =
+        RETRY_DELAY * attempt;
+
+      if (
+        error.status === 429 &&
+        error.retryAfter
+      ) {
+        const retryAfterSeconds =
+          Number(error.retryAfter);
+
+        if (
+          Number.isFinite(
+            retryAfterSeconds
+          )
+        ) {
+          waitTime = Math.max(
+            waitTime,
+            retryAfterSeconds * 1000
+          );
+        }
+      }
+
+      await new Promise(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            waitTime
+          )
+      );
     }
   }
 
-  throw lastError || new Error("Translation failed.");
+  throw (
+    lastError ||
+    new Error(
+      "Translation failed."
+    )
+  );
 };
 
-const buildCombinedQuestionText = (questionData) => {
-  return [
-    `${FIELD_MARKERS.question}\n${questionData.question || ""}`,
-    `${FIELD_MARKERS.optionA}\n${questionData.optionA || ""}`,
-    `${FIELD_MARKERS.optionB}\n${questionData.optionB || ""}`,
-    `${FIELD_MARKERS.optionC}\n${questionData.optionC || ""}`,
-    `${FIELD_MARKERS.optionD}\n${questionData.optionD || ""}`,
-    `${FIELD_MARKERS.explanation}\n${
-      questionData.explanation || ""
-    }`,
-  ].join("\n\n");
+// =====================================
+// BUILD QUESTION HTML
+// =====================================
+
+const buildQuestionHtml = (
+  questionData
+) => {
+  return `
+<div id="tv-question">${escapeHtml(
+    questionData.question || ""
+  )}</div>
+<div id="tv-option-a">${escapeHtml(
+    questionData.optionA || ""
+  )}</div>
+<div id="tv-option-b">${escapeHtml(
+    questionData.optionB || ""
+  )}</div>
+<div id="tv-option-c">${escapeHtml(
+    questionData.optionC || ""
+  )}</div>
+<div id="tv-option-d">${escapeHtml(
+    questionData.optionD || ""
+  )}</div>
+<div id="tv-explanation">${escapeHtml(
+    questionData.explanation || ""
+  )}</div>
+`.trim();
 };
 
-const extractField = (translatedText, marker, nextMarkers) => {
-  const startIndex = translatedText.indexOf(marker);
+// =====================================
+// EXTRACT TRANSLATED HTML
+// =====================================
 
-  if (startIndex === -1) {
-    throw new Error(
-      `Translation marker missing: ${marker}`
-    );
-  }
+const extractHtmlField = (
+  html,
+  id,
+  required = true
+) => {
+  const regex = new RegExp(
+    `<div\\s+[^>]*id=["']${id}["'][^>]*>([\\s\\S]*?)<\\/div>`,
+    "i"
+  );
 
-  const contentStart =
-    startIndex + marker.length;
+  const match =
+    html.match(regex);
 
-  let endIndex = translatedText.length;
-
-  for (const nextMarker of nextMarkers) {
-    const index = translatedText.indexOf(
-      nextMarker,
-      contentStart
-    );
-
-    if (index !== -1) {
-      endIndex = Math.min(endIndex, index);
+  if (!match) {
+    if (!required) {
+      return "";
     }
+
+    throw new Error(
+      `Translated field marker not found: ${id}`
+    );
   }
 
-  const value = translatedText
-    .slice(contentStart, endIndex)
-    .trim();
+  const value = decodeHtml(
+    match[1]
+      .replace(
+        /<[^>]+>/g,
+        ""
+      )
+  );
 
-  if (!value) {
+  if (
+    required &&
+    !value
+  ) {
     throw new Error(
-      `Translated field is empty: ${marker}`
+      `Translated field is empty: ${id}`
     );
   }
 
   return value;
 };
 
+// =====================================
+// TRANSLATE QUESTION
+// =====================================
+
 const translateQuestionToHindi = async (
   questionData
 ) => {
   if (
     !questionData ||
-    typeof questionData.question !== "string" ||
+    typeof questionData.question !==
+      "string" ||
     !questionData.question.trim()
   ) {
     throw new ApiError(
@@ -185,76 +304,61 @@ const translateQuestionToHindi = async (
     );
   }
 
-  const combinedText =
-    buildCombinedQuestionText(questionData);
+  const html =
+    buildQuestionHtml(
+      questionData
+    );
 
   try {
-    const translatedText =
-      await translateCombinedText(
-        combinedText,
+    const translatedHtml =
+      await translateHtml(
+        html,
         "hi"
       );
 
-    const markers = Object.values(FIELD_MARKERS);
+    const explanationRequired =
+      Boolean(
+        questionData.explanation &&
+          questionData.explanation.trim()
+      );
 
     return {
-      questionHindi: extractField(
-        translatedText,
-        FIELD_MARKERS.question,
-        markers.filter(
-          (marker) =>
-            marker !== FIELD_MARKERS.question
-        )
-      ),
+      questionHindi:
+        extractHtmlField(
+          translatedHtml,
+          "tv-question"
+        ),
 
-      optionAHindi: extractField(
-        translatedText,
-        FIELD_MARKERS.optionA,
-        markers.filter(
-          (marker) =>
-            marker !== FIELD_MARKERS.optionA
-        )
-      ),
+      optionAHindi:
+        extractHtmlField(
+          translatedHtml,
+          "tv-option-a"
+        ),
 
-      optionBHindi: extractField(
-        translatedText,
-        FIELD_MARKERS.optionB,
-        markers.filter(
-          (marker) =>
-            marker !== FIELD_MARKERS.optionB
-        )
-      ),
+      optionBHindi:
+        extractHtmlField(
+          translatedHtml,
+          "tv-option-b"
+        ),
 
-      optionCHindi: extractField(
-        translatedText,
-        FIELD_MARKERS.optionC,
-        markers.filter(
-          (marker) =>
-            marker !== FIELD_MARKERS.optionC
-        )
-      ),
+      optionCHindi:
+        extractHtmlField(
+          translatedHtml,
+          "tv-option-c"
+        ),
 
-      optionDHindi: extractField(
-        translatedText,
-        FIELD_MARKERS.optionD,
-        markers.filter(
-          (marker) =>
-            marker !== FIELD_MARKERS.optionD
-        )
-      ),
+      optionDHindi:
+        extractHtmlField(
+          translatedHtml,
+          "tv-option-d"
+        ),
 
       explanationHindi:
-        questionData.explanation?.trim()
-          ? extractField(
-              translatedText,
-              FIELD_MARKERS.explanation,
-              markers.filter(
-                (marker) =>
-                  marker !==
-                  FIELD_MARKERS.explanation
-              )
-            )
-          : "",
+        extractHtmlField(
+          translatedHtml,
+          "tv-explanation",
+          explanationRequired
+        ),
     };
   } catch (error) {
     if (error instanceof ApiError) {
@@ -268,6 +372,10 @@ const translateQuestionToHindi = async (
   }
 };
 
+// =====================================
+// SINGLE TEXT TRANSLATION
+// =====================================
+
 const translateText = async (
   text,
   target = "hi"
@@ -280,8 +388,8 @@ const translateText = async (
   }
 
   try {
-    return await translateCombinedText(
-      text.trim(),
+    return await translateHtml(
+      escapeHtml(text.trim()),
       target
     );
   } catch (error) {
