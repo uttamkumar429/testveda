@@ -1,151 +1,152 @@
-const Question = require("../models/Question");
+const mongoose = require("mongoose");
 
+const Question = require("../models/Question");
+const Test = require("../models/Test");
 const ApiError = require("../utils/ApiError");
 const {
-  translateQuestionToHindi,
-} = require("./translation.service");
-// =====================================
-// CONSTANTS
-// =====================================
+  enqueueQuestionTranslation,
+} = require("./translationJob.service");
 
-const ALLOWED_SORT_FIELDS = [
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 10;
+const MAX_LIMIT = 100;
+
+const ALLOWED_SORT_FIELDS = new Set([
   "createdAt",
-  "subject",
-  "difficulty",
-  "marks",
-];
-
-const ALLOWED_UPDATE_FIELDS = [
+  "updatedAt",
   "subject",
   "chapter",
   "difficulty",
-  "question",
-  "optionA",
-  "optionB",
-  "optionC",
-  "optionD",
-  "correctAnswer",
-  "explanation",
   "marks",
-];
+]);
 
-// =====================================
-// ESCAPE REGEX
-// =====================================
+const normalizeString = (value, fallback = "") =>
+  typeof value === "string" ? value.trim() : fallback;
 
-const escapeRegex = (text) => {
-  return text.replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
+const normalizePositiveInt = (value, fallback, max) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, max);
 };
 
-// =====================================
-// SANITIZE UPDATE DATA
-// =====================================
-
-const buildQuestionUpdate = (data) => {
-  const updateData = {};
-
-  for (const field of ALLOWED_UPDATE_FIELDS) {
-    if (
-      Object.prototype.hasOwnProperty.call(
-        data,
-        field
-      )
-    ) {
-      updateData[field] = data[field];
-    }
+const validateObjectId = (id) => {
+  if (!mongoose.isObjectIdOrHexString(id)) {
+    throw new ApiError(400, "Invalid question ID.");
   }
 
-  // -----------------------------------
-  // Normalize string fields
-  // -----------------------------------
+  return id;
+};
 
-  const stringFields = [
-    "subject",
-    "chapter",
-    "question",
-    "optionA",
-    "optionB",
-    "optionC",
-    "optionD",
-    "correctAnswer",
-    "difficulty",
-    "explanation",
+const escapeRegex = (value) =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const buildSearchRegex = (search) => {
+  const normalized = normalizeString(search);
+
+  return normalized
+    ? new RegExp(escapeRegex(normalized), "i")
+    : null;
+};
+
+const normalizeQuestionData = (data = {}) => ({
+  subject: normalizeString(data.subject),
+  chapter: normalizeString(data.chapter),
+  question: normalizeString(data.question),
+  optionA: normalizeString(data.optionA),
+  optionB: normalizeString(data.optionB),
+  optionC: normalizeString(data.optionC),
+  optionD: normalizeString(data.optionD),
+  correctAnswer: normalizeString(data.correctAnswer).toUpperCase(),
+  difficulty: normalizeString(data.difficulty, "Medium"),
+  marks: Number(data.marks),
+  explanation: normalizeString(data.explanation),
+});
+
+const assertValidQuestionData = (data) => {
+  const requiredStrings = [
+    ["subject", data.subject],
+    ["chapter", data.chapter],
+    ["question", data.question],
+    ["optionA", data.optionA],
+    ["optionB", data.optionB],
+    ["optionC", data.optionC],
+    ["optionD", data.optionD],
   ];
 
-  for (const field of stringFields) {
-    if (
-      typeof updateData[field] === "string"
-    ) {
-      updateData[field] =
-        updateData[field].trim();
-    }
+  const missing = requiredStrings.find(([, value]) => !value);
+
+  if (missing) {
+    throw new ApiError(400, `${missing[0]} is required.`);
   }
 
-  // -----------------------------------
-  // Normalize marks
-  // -----------------------------------
-
-  if (
-    Object.prototype.hasOwnProperty.call(
-      updateData,
-      "marks"
-    )
-  ) {
-    updateData.marks = Number(
-      updateData.marks
-    );
+  if (!["A", "B", "C", "D"].includes(data.correctAnswer)) {
+    throw new ApiError(400, "Correct Answer must be A, B, C or D.");
   }
 
-  return updateData;
-};
-
-
-// =====================================
-// SAFE HINDI TRANSLATION
-// =====================================
-
-const safeTranslateQuestionToHindi = async (
-  questionData
-) => {
-  // Tests must not call the external service.
-  if (process.env.NODE_ENV === "test") {
-    return {
-      questionHindi: "",
-      optionAHindi: "",
-      optionBHindi: "",
-      optionCHindi: "",
-      optionDHindi: "",
-      explanationHindi: "",
-    };
+  if (!["Easy", "Medium", "Hard"].includes(data.difficulty)) {
+    throw new ApiError(400, "Difficulty must be Easy, Medium or Hard.");
   }
 
-  // Production must not silently save
-  // an English-only question.
-  return await translateQuestionToHindi(
-    questionData
-  );
+  if (!Number.isFinite(data.marks) || data.marks < 1 || data.marks > 100) {
+    throw new ApiError(400, "Marks must be between 1 and 100.");
+  }
 };
 
 // =====================================
 // CREATE QUESTION
 // =====================================
 
-const createQuestion = async (
-  questionData
-) => {
-  const hindiTranslation =
-    await safeTranslateQuestionToHindi(
-      questionData
+const isTranslationEnabled = () =>
+  process.env.TRANSLATION_ENABLED !== undefined
+    ? String(process.env.TRANSLATION_ENABLED).toLowerCase() !== "false"
+    : process.env.NODE_ENV !== "test";
+
+const enqueueTranslationSafely = async (questionId) => {
+  if (!isTranslationEnabled()) return;
+
+  try {
+    await enqueueQuestionTranslation(questionId);
+  } catch (error) {
+    console.error(
+      `[QuestionTranslation] Failed to enqueue translation job for ${questionId}: ${
+        error?.message || "Unknown error"
+      }`
     );
+  }
+};
 
-  return await Question.create({
-    ...questionData,
+// =====================================
+// CREATE QUESTION
+// =====================================
 
-    ...hindiTranslation,
-  });
+const createQuestion = async (questionData) => {
+  const normalized = normalizeQuestionData(questionData);
+
+  assertValidQuestionData(normalized);
+
+  let createdQuestion;
+
+  try {
+    /*
+     * Translation is deliberately NOT part of the HTTP request.
+     * The core question is persisted first. A durable MongoDB job
+     * handles Hindi translation asynchronously.
+     */
+    createdQuestion = await Question.create({
+      ...normalized,
+      createdBy: questionData.createdBy,
+    });
+  } catch (error) {
+    if (error?.name === "ValidationError") {
+      throw new ApiError(400, "Invalid question data.");
+    }
+
+    throw error;
+  }
+
+  await enqueueTranslationSafely(createdQuestion._id);
+
+  return createdQuestion;
 };
 
 // =====================================
@@ -153,8 +154,8 @@ const createQuestion = async (
 // =====================================
 
 const getAllQuestions = async (
-  page = 1,
-  limit = 10,
+  page = DEFAULT_PAGE,
+  limit = DEFAULT_LIMIT,
   search = "",
   subject = "",
   chapter = "",
@@ -162,175 +163,121 @@ const getAllQuestions = async (
   sortBy = "createdAt",
   order = "desc"
 ) => {
-  // -----------------------------------
-  // Normalize pagination
-  // -----------------------------------
-
-  page = Math.max(
-    1,
-    Number(page)
+  const safePage = normalizePositiveInt(
+    page,
+    DEFAULT_PAGE,
+    Number.MAX_SAFE_INTEGER
   );
 
-  limit = Math.min(
-    100,
-    Math.max(1, Number(limit))
+  const safeLimit = normalizePositiveInt(
+    limit,
+    DEFAULT_LIMIT,
+    MAX_LIMIT
   );
 
-  const skip =
-    (page - 1) * limit;
+  const safeSortBy = ALLOWED_SORT_FIELDS.has(sortBy)
+    ? sortBy
+    : "createdAt";
 
-  // -----------------------------------
-  // Build filter
-  // -----------------------------------
+  const safeOrder = order === "asc" ? 1 : -1;
 
   const filter = {};
+  const searchRegex = buildSearchRegex(search);
 
-  // -----------------------------------
-  // Search
-  // -----------------------------------
-
-  const normalizedSearch =
-    typeof search === "string"
-      ? search.trim()
-      : "";
-
-  if (normalizedSearch) {
-    const safeSearch =
-      escapeRegex(
-        normalizedSearch
-      );
-
+  if (searchRegex) {
     filter.$or = [
-      {
-        subject: {
-          $regex: safeSearch,
-          $options: "i",
-        },
-      },
-      {
-        chapter: {
-          $regex: safeSearch,
-          $options: "i",
-        },
-      },
-      {
-        question: {
-          $regex: safeSearch,
-          $options: "i",
-        },
-      },
+      { subject: searchRegex },
+      { chapter: searchRegex },
+      { question: searchRegex },
+      { optionA: searchRegex },
+      { optionB: searchRegex },
+      { optionC: searchRegex },
+      { optionD: searchRegex },
     ];
   }
 
-  // -----------------------------------
-  // Filters
-  // -----------------------------------
-
-  const normalizedSubject =
-    typeof subject === "string"
-      ? subject.trim()
-      : "";
+  const normalizedSubject = normalizeString(subject);
+  const normalizedChapter = normalizeString(chapter);
+  const normalizedDifficulty = normalizeString(difficulty);
 
   if (normalizedSubject) {
-    filter.subject =
-      normalizedSubject;
+    filter.subject = normalizedSubject;
   }
-
-  const normalizedChapter =
-    typeof chapter === "string"
-      ? chapter.trim()
-      : "";
 
   if (normalizedChapter) {
-    filter.chapter =
-      normalizedChapter;
+    filter.chapter = normalizedChapter;
   }
-
-  const normalizedDifficulty =
-    typeof difficulty === "string"
-      ? difficulty.trim()
-      : "";
 
   if (normalizedDifficulty) {
-    filter.difficulty =
-      normalizedDifficulty;
+    if (!["Easy", "Medium", "Hard"].includes(normalizedDifficulty)) {
+      throw new ApiError(400, "Invalid difficulty filter.");
+    }
+
+    filter.difficulty = normalizedDifficulty;
   }
 
-  // -----------------------------------
-  // Sorting
-  // -----------------------------------
-
-  const safeSortField =
-    ALLOWED_SORT_FIELDS.includes(
-      sortBy
-    )
-      ? sortBy
-      : "createdAt";
-
-  const safeOrder =
-    order === "asc"
-      ? 1
-      : -1;
+  const skip = (safePage - 1) * safeLimit;
 
   const sort = {
-    [safeSortField]: safeOrder,
+    [safeSortBy]: safeOrder,
+    _id: safeOrder,
   };
 
-  // -----------------------------------
-  // Database query
-  // -----------------------------------
+  const [total, questions] = await Promise.all([
+    Question.countDocuments(filter),
 
-  const [total, questions] =
-    await Promise.all([
-      Question.countDocuments(
-        filter
-      ),
+    Question.find(filter)
+      .select(
+        "subject chapter difficulty question optionA optionB optionC optionD correctAnswer explanation questionHindi optionAHindi optionBHindi optionCHindi optionDHindi explanationHindi marks createdBy createdAt updatedAt"
+      )
+      .sort(sort)
+      .skip(skip)
+      .limit(safeLimit)
+      .populate("createdBy", "fullName email")
+      .lean(),
+  ]);
 
-      Question.find(filter)
-        .populate(
-          "createdBy",
-          "fullName email"
-        )
-        .sort(sort)
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-    ]);
+  const totalPages = Math.max(
+    1,
+    Math.ceil(total / safeLimit)
+  );
 
   return {
-    total,
-    page,
-    limit,
-    totalPages:
-      Math.ceil(
-        total / limit
-      ),
     questions,
+    page: safePage,
+    limit: safeLimit,
+    total,
+    totalPages,
+    hasNextPage: safePage < totalPages,
+    hasPrevPage: safePage > 1,
   };
 };
+
 // =====================================
-// GET QUESTION FILTER METADATA
+// FILTER METADATA
 // =====================================
 
 const getQuestionMetadata = async () => {
-  const [subjects, chapterPairs] =
-    await Promise.all([
-      Question.distinct("subject"),
+  const [subjects, chapterPairs] = await Promise.all([
+    Question.distinct("subject", {
+      subject: { $nin: [null, ""] },
+    }),
 
-      Question.find({})
-        .select("subject chapter")
-        .lean(),
-    ]);
+    Question.find({
+      subject: { $nin: [null, ""] },
+      chapter: { $nin: [null, ""] },
+    })
+      .select("subject chapter -_id")
+      .lean(),
+  ]);
 
   const chaptersBySubject = {};
 
   for (const item of chapterPairs) {
-    const subject = item.subject?.trim();
-    const chapter = item.chapter?.trim();
+    const subject = normalizeString(item.subject);
+    const chapter = normalizeString(item.chapter);
 
-    if (!subject || !chapter) {
-      continue;
-    }
+    if (!subject || !chapter) continue;
 
     if (!chaptersBySubject[subject]) {
       chaptersBySubject[subject] = new Set();
@@ -339,27 +286,19 @@ const getQuestionMetadata = async () => {
     chaptersBySubject[subject].add(chapter);
   }
 
-  const normalizedChaptersBySubject = {};
-
-  for (const [subject, chapterSet] of Object.entries(
-    chaptersBySubject
-  )) {
-    normalizedChaptersBySubject[subject] = [
-      ...chapterSet,
-    ].sort((a, b) =>
-      a.localeCompare(b)
-    );
-  }
+  const normalizedMap = Object.fromEntries(
+    Object.entries(chaptersBySubject).map(([key, value]) => [
+      key,
+      [...value].sort((a, b) => a.localeCompare(b)),
+    ])
+  );
 
   return {
-    subjects: [...subjects]
+    subjects: subjects
       .filter(Boolean)
-      .sort((a, b) =>
-        a.localeCompare(b)
-      ),
+      .sort((a, b) => a.localeCompare(b)),
 
-    chaptersBySubject:
-      normalizedChaptersBySubject,
+    chaptersBySubject: normalizedMap,
   };
 };
 
@@ -367,14 +306,14 @@ const getQuestionMetadata = async () => {
 // GET QUESTION BY ID
 // =====================================
 
-const getQuestionById = async (
-  id
-) => {
-  return await Question.findById(id)
-    .populate(
-      "createdBy",
-      "fullName email"
+const getQuestionById = async (id) => {
+  validateObjectId(id);
+
+  return Question.findById(id)
+    .select(
+      "subject chapter difficulty question optionA optionB optionC optionD correctAnswer explanation questionHindi optionAHindi optionBHindi optionCHindi optionDHindi explanationHindi marks createdBy createdAt updatedAt"
     )
+    .populate("createdBy", "fullName email")
     .lean();
 };
 
@@ -382,111 +321,119 @@ const getQuestionById = async (
 // UPDATE QUESTION
 // =====================================
 
-const updateQuestion = async (
-  id,
-  data
-) => {
-  const updateData =
-    buildQuestionUpdate(
-      data
-    );
+const updateQuestion = async (id, questionData = {}) => {
+  validateObjectId(id);
 
-  if (
-    Object.keys(updateData).length === 0
-  ) {
-    throw new ApiError(
-      400,
-      "No valid question fields were provided for update."
-    );
+  const existing = await Question.findById(id);
+
+  if (!existing) {
+    return null;
   }
 
-  const translationFields = [
+  const normalized = normalizeQuestionData({
+    ...existing.toObject(),
+    ...questionData,
+  });
+
+  assertValidQuestionData(normalized);
+
+  const translatableFieldsChanged = [
     "question",
     "optionA",
     "optionB",
     "optionC",
     "optionD",
     "explanation",
-  ];
-
-  const shouldTranslate =
-    translationFields.some((field) =>
+  ].some(
+    (field) =>
       Object.prototype.hasOwnProperty.call(
-        updateData,
+        questionData,
         field
-      )
-    );
+      ) &&
+      normalizeString(existing[field]) !==
+        normalizeString(questionData[field])
+  );
 
-  if (shouldTranslate) {
-    const existingQuestion =
-      await Question.findById(id).lean();
+  const updateData = {
+    ...normalized,
+  };
 
-    if (!existingQuestion) {
-      return null;
+  delete updateData.createdBy;
+
+  let updated;
+
+  try {
+    /*
+     * Core question update is independent of translation.
+     * No external translation provider is called here.
+     */
+    updated = await Question.findByIdAndUpdate(
+      id,
+      {
+        $set: updateData,
+      },
+      {
+        new: true,
+        runValidators: true,
+        context: "query",
+      }
+    )
+      .populate("createdBy", "fullName email")
+      .lean();
+  } catch (error) {
+    if (error?.name === "ValidationError") {
+      throw new ApiError(400, "Invalid question data.");
     }
 
-    const questionForTranslation = {
-      question:
-        updateData.question ??
-        existingQuestion.question,
-
-      optionA:
-        updateData.optionA ??
-        existingQuestion.optionA,
-
-      optionB:
-        updateData.optionB ??
-        existingQuestion.optionB,
-
-      optionC:
-        updateData.optionC ??
-        existingQuestion.optionC,
-
-      optionD:
-        updateData.optionD ??
-        existingQuestion.optionD,
-
-      explanation:
-        updateData.explanation ??
-        existingQuestion.explanation,
-    };
-
-    const hindiTranslation =
-      await safeTranslateQuestionToHindi(
-        questionForTranslation
-      );
-
-    Object.assign(
-      updateData,
-      hindiTranslation
-    );
+    throw error;
   }
 
-  return await Question.findByIdAndUpdate(
-    id,
-    updateData,
-    {
-      returnDocument: "after",
-      runValidators: true,
-    }
-  )
-    .populate(
-      "createdBy",
-      "fullName email"
-    )
-    .lean();
+  if (!updated) {
+    return null;
+  }
+
+  if (translatableFieldsChanged) {
+    await enqueueTranslationSafely(id);
+  }
+
+  return updated;
 };
 
 // =====================================
 // DELETE QUESTION
 // =====================================
 
-const deleteQuestion = async (
-  id
-) => {
-  return await Question.findByIdAndDelete(
-    id
-  ).lean();
+const deleteQuestion = async (id) => {
+  validateObjectId(id);
+
+  const question = await Question.findById(id)
+    .select("_id")
+    .lean();
+
+  if (!question) {
+    return null;
+  }
+
+  /*
+   * A question referenced by a test must not be hard-deleted because
+   * it would leave the Test document with a broken reference.
+   */
+  const referencedTest = await Test.findOne({
+    questions: id,
+  })
+    .select("_id title status")
+    .lean();
+
+  if (referencedTest) {
+    throw new ApiError(
+      409,
+      "Question cannot be deleted because it is used by a test. Remove it from the test first."
+    );
+  }
+
+  await Question.findByIdAndDelete(id);
+
+  return question;
 };
 
 module.exports = {

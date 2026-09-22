@@ -3,6 +3,7 @@ const Question = require("../../models/Question");
 const Test = require("../../models/Test");
 const TestSnapshot = require("../../models/TestSnapshot");
 const ExamAttempt = require("../../models/ExamAttempt");
+const TranslationJob = require("../../models/TranslationJob");
 
 const Notification =
   require("../../models/Notification");
@@ -24,6 +25,7 @@ const cleanup = async () => {
   await TestSnapshot.deleteMany({});
 
   await ExamAttempt.deleteMany({});
+  await TranslationJob.deleteMany({});
 
   await Notification.deleteMany({});
 

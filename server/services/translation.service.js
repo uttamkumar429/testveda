@@ -1,302 +1,722 @@
 const ApiError = require("../utils/ApiError");
 
-const TRANSLATE_URL =
-  process.env.LIBRETRANSLATE_URL ||
-  "https://libretranslate-sj86.onrender.com/translate";
+const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_RETRY_DELAY_MS = 1000;
+const DEFAULT_CONCURRENCY = 1;
+const MAX_TRANSLATABLE_TEXT_LENGTH = 10000;
 
-const TRANSLATION_TIMEOUT = Number(
-  process.env.TRANSLATION_TIMEOUT_MS || 60000
-);
+// Prevent repeatedly hitting a provider which is currently rate limited.
+const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60000;
 
-const MAX_RETRIES = Number(
-  process.env.TRANSLATION_MAX_RETRIES || 3
-);
+const QUESTION_TRANSLATION_FIELDS = [
+  ["question", "questionHindi"],
+  ["optionA", "optionAHindi"],
+  ["optionB", "optionBHindi"],
+  ["optionC", "optionCHindi"],
+  ["optionD", "optionDHindi"],
+  ["explanation", "explanationHindi"],
+];
 
-const RETRY_DELAY = Number(
-  process.env.TRANSLATION_RETRY_DELAY_MS || 5000
-);
+let providerRateLimitedUntil = 0;
 
-// =====================================
-// HTML HELPERS
-// =====================================
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const escapeHtml = (value) => {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+const toPositiveNumber = (value, fallback) => {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : fallback;
 };
 
-const decodeHtml = (value) => {
-  return String(value ?? "")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .trim();
-};
+const getConfig = () => {
+  const provider = String(
+    process.env.TRANSLATION_PROVIDER ||
+      (process.env.LIBRETRANSLATE_URL
+        ? "libretranslate"
+        : "google")
+  ).toLowerCase();
 
-// =====================================
-// REQUEST
-// =====================================
+  const timeoutMs = toPositiveNumber(
+    process.env.TRANSLATION_TIMEOUT_MS,
+    DEFAULT_TIMEOUT_MS
+  );
 
-const requestTranslation = async (
-  html,
-  target = "hi"
-) => {
-  const controller = new AbortController();
-
-  const timeoutId = setTimeout(() => {
-    controller.abort();
-  }, TRANSLATION_TIMEOUT);
-
-  try {
-    const response = await fetch(
-      TRANSLATE_URL,
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-
-        body: JSON.stringify({
-          q: html,
-          source: "en",
-          target,
-          format: "html",
-        }),
-
-        signal: controller.signal,
-      }
-    );
-
-    const responseText =
-      await response.text();
-
-    if (response.status === 429) {
-      const retryAfter =
-        response.headers.get("retry-after");
-
-      const error = new Error(
-        `Translation service rate limited the request (429)${
-          retryAfter
-            ? `. Retry-After: ${retryAfter}`
-            : ""
-        }`
-      );
-
-      error.status = 429;
-      error.retryAfter = retryAfter;
-
-      throw error;
-    }
-
-    if (!response.ok) {
-      throw new Error(
-        `Translation request failed with status ${response.status}: ${responseText.slice(
-          0,
-          300
-        )}`
-      );
-    }
-
-    let data;
-
-    try {
-      data = JSON.parse(responseText);
-    } catch {
-      throw new Error(
-        `Translation service returned invalid JSON: ${responseText.slice(
-          0,
-          300
-        )}`
-      );
-    }
-
-    if (
-      !data ||
-      typeof data.translatedText !==
-        "string" ||
-      !data.translatedText.trim()
-    ) {
-      throw new Error(
-        "Translation service returned an invalid translatedText."
-      );
-    }
-
-    return data.translatedText.trim();
-  } finally {
-    clearTimeout(timeoutId);
-  }
-};
-
-// =====================================
-// RETRY
-// =====================================
-
-const translateHtml = async (
-  html,
-  target = "hi"
-) => {
-  let lastError;
-
-  for (
-    let attempt = 1;
-    attempt <= MAX_RETRIES;
-    attempt += 1
-  ) {
-    try {
-      return await requestTranslation(
-        html,
-        target
-      );
-    } catch (error) {
-      lastError = error;
-
-      console.warn(
-        `Translation attempt ${attempt}/${MAX_RETRIES} failed: ${error.message}`
-      );
-
-      if (
-        attempt >= MAX_RETRIES
-      ) {
-        break;
-      }
-
-      let waitTime =
-        RETRY_DELAY * attempt;
-
-      if (
-        error.status === 429 &&
-        error.retryAfter
-      ) {
-        const retryAfterSeconds =
-          Number(error.retryAfter);
-
-        if (
-          Number.isFinite(
-            retryAfterSeconds
-          )
-        ) {
-          waitTime = Math.max(
-            waitTime,
-            retryAfterSeconds * 1000
-          );
-        }
-      }
-
-      await new Promise(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            waitTime
-          )
-      );
-    }
-  }
-
-  throw (
-    lastError ||
-    new Error(
-      "Translation failed."
+  const maxRetries = Math.min(
+    5,
+    Math.floor(
+      toPositiveNumber(
+        process.env.TRANSLATION_MAX_RETRIES,
+        DEFAULT_MAX_RETRIES
+      )
     )
   );
-};
 
-// =====================================
-// BUILD QUESTION HTML
-// =====================================
-
-const buildQuestionHtml = (
-  questionData
-) => {
-  return `
-<div id="tv-question">${escapeHtml(
-    questionData.question || ""
-  )}</div>
-<div id="tv-option-a">${escapeHtml(
-    questionData.optionA || ""
-  )}</div>
-<div id="tv-option-b">${escapeHtml(
-    questionData.optionB || ""
-  )}</div>
-<div id="tv-option-c">${escapeHtml(
-    questionData.optionC || ""
-  )}</div>
-<div id="tv-option-d">${escapeHtml(
-    questionData.optionD || ""
-  )}</div>
-<div id="tv-explanation">${escapeHtml(
-    questionData.explanation || ""
-  )}</div>
-`.trim();
-};
-
-// =====================================
-// EXTRACT TRANSLATED HTML
-// =====================================
-
-const extractHtmlField = (
-  html,
-  id,
-  required = true
-) => {
-  const regex = new RegExp(
-    `<div\\s+[^>]*id=["']${id}["'][^>]*>([\\s\\S]*?)<\\/div>`,
-    "i"
+  const retryDelayMs = toPositiveNumber(
+    process.env.TRANSLATION_RETRY_DELAY_MS,
+    DEFAULT_RETRY_DELAY_MS
   );
 
-  const match =
-    html.match(regex);
-
-  if (!match) {
-    if (!required) {
-      return "";
-    }
-
-    throw new Error(
-      `Translated field marker not found: ${id}`
-    );
-  }
-
-  const value = decodeHtml(
-    match[1]
-      .replace(
-        /<[^>]+>/g,
-        ""
+  const concurrency = Math.min(
+    5,
+    Math.max(
+      1,
+      Math.floor(
+        toPositiveNumber(
+          process.env.TRANSLATION_CONCURRENCY,
+          DEFAULT_CONCURRENCY
+        )
       )
+    )
   );
 
-  if (
-    required &&
-    !value
-  ) {
-    throw new Error(
-      `Translated field is empty: ${id}`
+  const rateLimitCooldownMs = Math.min(
+    300000,
+    Math.max(
+      5000,
+      Math.floor(
+        toPositiveNumber(
+          process.env.TRANSLATION_RATE_LIMIT_COOLDOWN_MS,
+          DEFAULT_RATE_LIMIT_COOLDOWN_MS
+        )
+      )
+    )
+  );
+
+  return {
+    provider,
+    timeoutMs,
+    maxRetries,
+    retryDelayMs,
+    concurrency,
+    rateLimitCooldownMs,
+    source: String(
+      process.env.TRANSLATION_SOURCE_LANGUAGE || "en"
+    ).trim(),
+  };
+};
+
+const normalizeLanguage = (language) => {
+  const value = String(language || "hi")
+    .trim()
+    .toLowerCase();
+
+  if (!/^[a-z]{2,5}(?:-[a-z]{2,5})?$/.test(value)) {
+    throw new ApiError(
+      400,
+      "Invalid translation target language."
     );
   }
 
   return value;
 };
 
-// =====================================
-// TRANSLATE QUESTION
-// =====================================
+const normalizeText = (text) =>
+  typeof text === "string" ? text.trim() : "";
+
+const assertTextSize = (text) => {
+  if (text.length > MAX_TRANSLATABLE_TEXT_LENGTH) {
+    throw new ApiError(
+      400,
+      `Text is too long to translate. Maximum length is ${MAX_TRANSLATABLE_TEXT_LENGTH} characters.`
+    );
+  }
+};
+
+const parseRetryAfterMs = (value) => {
+  if (!value) return 0;
+
+  const seconds = Number(value);
+
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1000, 60000);
+  }
+
+  const date = Date.parse(value);
+
+  if (Number.isFinite(date)) {
+    return Math.min(
+      Math.max(date - Date.now(), 0),
+      60000
+    );
+  }
+
+  return 0;
+};
+
+const isRetryableStatus = (status) =>
+  [408, 425, 429, 500, 502, 503, 504].includes(status);
+
+const buildProviderError = (
+  message,
+  status,
+  retryAfter
+) => {
+  const error = new Error(message);
+
+  error.status = status;
+  error.retryAfter = retryAfter;
+
+  return error;
+};
+
+const createRateLimitError = (cooldownMs) => {
+  const error = new Error(
+    "Translation provider is rate limited. Retrying later."
+  );
+
+  error.status = 429;
+  error.retryAfter = cooldownMs;
+
+  return error;
+};
+
+const isProviderRateLimited = () =>
+  Date.now() < providerRateLimitedUntil;
+
+const markProviderRateLimited = (cooldownMs) => {
+  const safeCooldown = Math.min(
+    Math.max(
+      Number(cooldownMs) || DEFAULT_RATE_LIMIT_COOLDOWN_MS,
+      5000
+    ),
+    300000
+  );
+
+  providerRateLimitedUntil = Date.now() + safeCooldown;
+};
+
+const requestLibreTranslate = async (
+  text,
+  target,
+  config
+) => {
+  const url = process.env.LIBRETRANSLATE_URL;
+
+  if (!url) {
+    throw new ApiError(
+      500,
+      "LibreTranslate URL is not configured."
+    );
+  }
+
+  const controller = new AbortController();
+
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    config.timeoutMs
+  );
+
+  try {
+    const body = {
+      q: text,
+      source: config.source,
+      target,
+      format: "text",
+    };
+
+    if (process.env.LIBRETRANSLATE_API_KEY) {
+      body.api_key =
+        process.env.LIBRETRANSLATE_API_KEY;
+    }
+
+    let response;
+
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        throw buildProviderError(
+          "Translation provider timed out.",
+          504
+        );
+      }
+
+      throw error;
+    }
+
+    const raw = await response.text();
+
+    if (!response.ok) {
+      throw buildProviderError(
+        `LibreTranslate request failed with status ${response.status}.`,
+        response.status,
+        response.headers.get("retry-after")
+      );
+    }
+
+    let data;
+
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      throw new Error(
+        "LibreTranslate returned invalid JSON."
+      );
+    }
+
+    const translated = normalizeText(
+      data?.translatedText
+    );
+
+    if (!translated) {
+      throw new Error(
+        "LibreTranslate returned an empty translation."
+      );
+    }
+
+    return translated;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const requestGoogleTranslate = async (
+  texts,
+  target,
+  config
+) => {
+  const apiKey =
+    process.env.GOOGLE_TRANSLATE_API_KEY;
+
+  if (!apiKey) {
+    throw new ApiError(
+      500,
+      "Google Translation API key is not configured."
+    );
+  }
+
+  const url =
+    process.env.GOOGLE_TRANSLATE_URL ||
+    "https://translation.googleapis.com/language/translate/v2";
+
+  const controller = new AbortController();
+
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    config.timeoutMs
+  );
+
+  try {
+    let response;
+
+    try {
+      response = await fetch(
+        `${url}?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json; charset=utf-8",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            q: texts,
+            source: config.source,
+            target,
+            format: "text",
+          }),
+          signal: controller.signal,
+        }
+      );
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        throw buildProviderError(
+          "Translation provider timed out.",
+          504
+        );
+      }
+
+      throw error;
+    }
+
+    const raw = await response.text();
+
+    if (!response.ok) {
+      throw buildProviderError(
+        `Google Translation request failed with status ${response.status}.`,
+        response.status,
+        response.headers.get("retry-after")
+      );
+    }
+
+    let data;
+
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      throw new Error(
+        "Google Translation returned invalid JSON."
+      );
+    }
+
+    const translations =
+      data?.data?.translations;
+
+    if (
+      !Array.isArray(translations) ||
+      translations.length !== texts.length
+    ) {
+      throw new Error(
+        "Google Translation returned an invalid response."
+      );
+    }
+
+    return translations.map((item) => {
+      const translated = normalizeText(
+        item?.translatedText
+      );
+
+      if (!translated) {
+        throw new Error(
+          "Google Translation returned empty text."
+        );
+      }
+
+      return translated;
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const translateWithRetry = async (
+  text,
+  target,
+  config
+) => {
+  if (isProviderRateLimited()) {
+    throw createRateLimitError(
+      Math.max(
+        providerRateLimitedUntil - Date.now(),
+        5000
+      )
+    );
+  }
+
+  let lastError;
+
+  for (
+    let attempt = 1;
+    attempt <= config.maxRetries;
+    attempt += 1
+  ) {
+    try {
+      if (isProviderRateLimited()) {
+        throw createRateLimitError(
+          Math.max(
+            providerRateLimitedUntil - Date.now(),
+            5000
+          )
+        );
+      }
+
+      if (config.provider === "google") {
+        const [translated] =
+          await requestGoogleTranslate(
+            [text],
+            target,
+            config
+          );
+
+        return translated;
+      }
+
+      if (
+        config.provider === "libretranslate"
+      ) {
+        return await requestLibreTranslate(
+          text,
+          target,
+          config
+        );
+      }
+
+      throw new ApiError(
+        500,
+        `Unsupported translation provider: ${config.provider}.`
+      );
+    } catch (error) {
+      lastError = error;
+
+      if (
+        error instanceof ApiError &&
+        error.statusCode === 500
+      ) {
+        throw error;
+      }
+
+      const status = Number(error?.status);
+
+      /*
+       * 429 is handled specially.
+       *
+       * Do not keep hammering a rate-limited provider.
+       */
+      if (status === 429) {
+        const retryAfterMs =
+          parseRetryAfterMs(
+            error?.retryAfter
+          ) || config.rateLimitCooldownMs;
+
+        markProviderRateLimited(
+          retryAfterMs
+        );
+
+        break;
+      }
+
+      const retryable =
+        !Number.isFinite(status) ||
+        isRetryableStatus(status);
+
+      if (
+        !retryable ||
+        attempt >= config.maxRetries
+      ) {
+        break;
+      }
+
+      const retryAfterMs =
+        parseRetryAfterMs(
+          error?.retryAfter
+        );
+
+      const exponentialMs =
+        config.retryDelayMs *
+        2 ** (attempt - 1);
+
+      // Small jitter prevents synchronized retries.
+      const jitterMs =
+        Math.floor(Math.random() * 250);
+
+      const delayMs = Math.min(
+        Math.max(
+          exponentialMs,
+          retryAfterMs
+        ) + jitterMs,
+        60000
+      );
+
+      await sleep(delayMs);
+    }
+  }
+
+  throw (
+    lastError ||
+    new Error("Translation failed.")
+  );
+};
+
+const translateWithRetryGoogleBatch = async (
+  texts,
+  target,
+  config
+) => {
+  if (!texts.length) {
+    return [];
+  }
+
+  if (isProviderRateLimited()) {
+    throw createRateLimitError(
+      Math.max(
+        providerRateLimitedUntil - Date.now(),
+        5000
+      )
+    );
+  }
+
+  let lastError;
+
+  for (
+    let attempt = 1;
+    attempt <= config.maxRetries;
+    attempt += 1
+  ) {
+    try {
+      if (isProviderRateLimited()) {
+        throw createRateLimitError(
+          Math.max(
+            providerRateLimitedUntil - Date.now(),
+            5000
+          )
+        );
+      }
+
+      return await requestGoogleTranslate(
+        texts,
+        target,
+        config
+      );
+    } catch (error) {
+      lastError = error;
+
+      if (
+        error instanceof ApiError &&
+        error.statusCode === 500
+      ) {
+        throw error;
+      }
+
+      const status = Number(error?.status);
+
+      if (status === 429) {
+        const retryAfterMs =
+          parseRetryAfterMs(
+            error?.retryAfter
+          ) || config.rateLimitCooldownMs;
+
+        markProviderRateLimited(
+          retryAfterMs
+        );
+
+        break;
+      }
+
+      const retryable =
+        !Number.isFinite(status) ||
+        isRetryableStatus(status);
+
+      if (
+        !retryable ||
+        attempt >= config.maxRetries
+      ) {
+        break;
+      }
+
+      const retryAfterMs =
+        parseRetryAfterMs(
+          error?.retryAfter
+        );
+
+      const exponentialMs =
+        config.retryDelayMs *
+        2 ** (attempt - 1);
+
+      const jitterMs =
+        Math.floor(Math.random() * 250);
+
+      const delayMs = Math.min(
+        Math.max(
+          exponentialMs,
+          retryAfterMs
+        ) + jitterMs,
+        60000
+      );
+
+      await sleep(delayMs);
+    }
+  }
+
+  throw (
+    lastError ||
+    new Error("Google Translation failed.")
+  );
+};
+
+const runWithConcurrency = async (
+  items,
+  worker,
+  concurrency
+) => {
+  const results = new Array(items.length);
+
+  let nextIndex = 0;
+
+  const safeConcurrency = Math.max(
+    1,
+    Math.min(
+      Number(concurrency) || 1,
+      items.length || 1
+    )
+  );
+
+  const runWorker = async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+
+      if (index >= items.length) {
+        return;
+      }
+
+      results[index] = await worker(
+        items[index],
+        index
+      );
+    }
+  };
+
+  const workers = Array.from(
+    {
+      length: safeConcurrency,
+    },
+    () => runWorker()
+  );
+
+  await Promise.all(workers);
+
+  return results;
+};
+
+const translateText = async (
+  text,
+  target = "hi"
+) => {
+  const normalizedText =
+    normalizeText(text);
+
+  if (!normalizedText) {
+    return "";
+  }
+
+  assertTextSize(normalizedText);
+
+  const normalizedTarget =
+    normalizeLanguage(target);
+
+  const config = getConfig();
+
+  try {
+    return await translateWithRetry(
+      normalizedText,
+      normalizedTarget,
+      config
+    );
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    if (Number(error?.status) === 429) {
+      throw new ApiError(
+        429,
+        "Translation service is rate limited. Please retry later."
+      );
+    }
+
+    throw new ApiError(
+      502,
+      "Translation service is temporarily unavailable."
+    );
+  }
+};
 
 const translateQuestionToHindi = async (
   questionData
 ) => {
   if (
     !questionData ||
-    typeof questionData.question !==
-      "string" ||
-    !questionData.question.trim()
+    !normalizeText(questionData.question)
   ) {
     throw new ApiError(
       400,
@@ -304,103 +724,218 @@ const translateQuestionToHindi = async (
     );
   }
 
-  const html =
-    buildQuestionHtml(
-      questionData
+  const config = getConfig();
+
+  const entries =
+    QUESTION_TRANSLATION_FIELDS.map(
+      ([source]) =>
+        normalizeText(
+          questionData[source]
+        )
     );
 
+  entries.forEach((text) => {
+    if (text) {
+      assertTextSize(text);
+    }
+  });
+
   try {
-    const translatedHtml =
-      await translateHtml(
-        html,
-        "hi"
+    let translated;
+
+    /*
+     * Google supports batching, so send all non-empty fields
+     * in one request instead of creating multiple API calls.
+     */
+    if (config.provider === "google") {
+      const activeEntries = entries
+        .map((text, index) => ({
+          text,
+          index,
+        }))
+        .filter(
+          (item) => Boolean(item.text)
+        );
+
+      const values = activeEntries.map(
+        (item) => item.text
       );
 
-    const explanationRequired =
-      Boolean(
-        questionData.explanation &&
-          questionData.explanation.trim()
+      const translatedValues =
+        values.length
+          ? await translateWithRetryGoogleBatch(
+              values,
+              "hi",
+              config
+            )
+          : [];
+
+      translated = entries.map(
+        () => ""
       );
 
-    return {
-      questionHindi:
-        extractHtmlField(
-          translatedHtml,
-          "tv-question"
-        ),
+      activeEntries.forEach(
+        (item, index) => {
+          translated[item.index] =
+            translatedValues[index];
+        }
+      );
+    } else {
+      /*
+       * LibreTranslate is deliberately limited by
+       * configured concurrency. Default = 1.
+       *
+       * This reduces 429 risk significantly.
+       */
+      translated =
+        await runWithConcurrency(
+          entries,
+          async (text) =>
+            text
+              ? translateWithRetry(
+                  text,
+                  "hi",
+                  config
+                )
+              : "",
+          Math.min(
+            config.concurrency,
+            1
+          )
+        );
+    }
 
-      optionAHindi:
-        extractHtmlField(
-          translatedHtml,
-          "tv-option-a"
-        ),
-
-      optionBHindi:
-        extractHtmlField(
-          translatedHtml,
-          "tv-option-b"
-        ),
-
-      optionCHindi:
-        extractHtmlField(
-          translatedHtml,
-          "tv-option-c"
-        ),
-
-      optionDHindi:
-        extractHtmlField(
-          translatedHtml,
-          "tv-option-d"
-        ),
-
-      explanationHindi:
-        extractHtmlField(
-          translatedHtml,
-          "tv-explanation",
-          explanationRequired
-        ),
-    };
+    return Object.fromEntries(
+      QUESTION_TRANSLATION_FIELDS.map(
+        ([, targetField], index) => [
+          targetField,
+          translated[index] || "",
+        ]
+      )
+    );
   } catch (error) {
     if (error instanceof ApiError) {
       throw error;
     }
 
+    if (Number(error?.status) === 429) {
+      throw new ApiError(
+        429,
+        "Translation service is rate limited."
+      );
+    }
+
     throw new ApiError(
       502,
-      `Question translation failed after ${MAX_RETRIES} attempts: ${error.message}`
+      "Question translation service is temporarily unavailable."
     );
   }
 };
 
-// =====================================
-// SINGLE TEXT TRANSLATION
-// =====================================
+const translateQuestionToLanguage = async (
+  questionData,
+  target
+) => {
+  const normalizedTarget =
+    normalizeLanguage(target);
 
-const translateText = async (
-  text,
+  const entries =
+    QUESTION_TRANSLATION_FIELDS.map(
+      ([source]) =>
+        normalizeText(
+          questionData?.[source]
+        )
+    );
+
+  entries.forEach((text) => {
+    if (text) {
+      assertTextSize(text);
+    }
+  });
+
+  const config = getConfig();
+
+  const translated =
+    await runWithConcurrency(
+      entries,
+      async (text) =>
+        text
+          ? translateText(
+              text,
+              normalizedTarget
+            )
+          : "",
+      config.provider === "libretranslate"
+        ? Math.min(
+            config.concurrency,
+            1
+          )
+        : config.concurrency
+    );
+
+  return Object.fromEntries(
+    QUESTION_TRANSLATION_FIELDS.map(
+      ([, targetField], index) => [
+        targetField,
+        translated[index] || "",
+      ]
+    )
+  );
+};
+
+const translateExamQuestions = async (
+  questions,
   target = "hi"
 ) => {
-  if (
-    typeof text !== "string" ||
-    !text.trim()
-  ) {
-    return "";
+  if (!Array.isArray(questions)) {
+    throw new ApiError(
+      400,
+      "Questions must be an array."
+    );
   }
 
-  try {
-    return await translateHtml(
-      escapeHtml(text.trim()),
-      target
+  const config = getConfig();
+
+  const translatedQuestions =
+    await runWithConcurrency(
+      questions,
+      async (question) => {
+        try {
+          const translation =
+            await translateQuestionToLanguage(
+              question,
+              target
+            );
+
+          return {
+            ...question,
+            ...translation,
+          };
+        } catch (error) {
+          /*
+           * Translation is optional during exam delivery.
+           * Never break the exam because translation provider
+           * is unavailable.
+           */
+          return {
+            ...question,
+            translationUnavailable: true,
+          };
+        }
+      },
+      config.provider === "libretranslate"
+        ? Math.min(
+            config.concurrency,
+            1
+          )
+        : config.concurrency
     );
-  } catch (error) {
-    throw new ApiError(
-      502,
-      `Text translation failed after ${MAX_RETRIES} attempts: ${error.message}`
-    );
-  }
+
+  return translatedQuestions;
 };
 
 module.exports = {
   translateText,
   translateQuestionToHindi,
+  translateExamQuestions,
 };
