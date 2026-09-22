@@ -68,7 +68,7 @@ const claimNextJob = async () => {
       },
     },
     {
-      new: true,
+      returnDocument: "after",
       sort: {
         nextAttemptAt: 1,
         createdAt: 1,
@@ -78,9 +78,11 @@ const claimNextJob = async () => {
 };
 
 const processJob = async (job) => {
-  const question = await Question.findById(
-    job.question
-  )
+  console.log(
+    `[TranslationWorker] Processing job ${job._id} for question ${job.question}`
+  );
+
+  const question = await Question.findById(job.question)
     .select(
       "question optionA optionB optionC optionD explanation"
     )
@@ -201,9 +203,15 @@ const runWorker = async () => {
   try {
     const job = await claimNextJob();
 
-    if (job) {
-      await processJob(job);
+    if (!job) {
+      return;
     }
+
+    console.log(
+      `[TranslationWorker] Job claimed. Job: ${job._id}, Question: ${job.question}, Status: ${job.status}, Attempts: ${job.attempts}`
+    );
+
+    await processJob(job);
   } catch (error) {
     console.error(
       `[TranslationWorker] Worker cycle failed: ${error?.message || error}`
@@ -212,7 +220,6 @@ const runWorker = async () => {
     workerRunning = false;
   }
 };
-
 const startTranslationWorker = () => {
   if (workerTimer) return;
 
