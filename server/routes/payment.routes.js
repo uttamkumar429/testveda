@@ -5,6 +5,13 @@ const { protect } = require("../middleware/auth.middleware");
 const authorize = require("../middleware/role.middleware");
 const controller = require("../controllers/payment.controller");
 
+// Razorpay calls this endpoint server-to-server.
+// Signature verification is performed before any payment state is changed.
+router.post(
+  "/webhook",
+  controller.webhook
+);
+
 router.post(
   "/order",
   protect,
@@ -18,6 +25,7 @@ router.post(
   authorize("student"),
   controller.verify
 );
+
 router.post(
   "/subscription/order",
   protect,

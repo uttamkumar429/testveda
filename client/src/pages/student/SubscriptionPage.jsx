@@ -159,9 +159,7 @@ if (!data?.orderId) {
 // MOCK PAYMENT
 // -------------------------------------
 
-if (
-  import.meta.env.VITE_PAYMENT_MODE === "mock"
-) {
+if (data?.mock) {
   await paymentService.verifySubscriptionPayment({
     razorpay_order_id: data.orderId,
     razorpay_payment_id: `mock_payment_${Date.now()}`,
@@ -492,13 +490,8 @@ try {
 
       {!subscription ? (
         <SubscriptionCard
-          amount={
-            Number(
-              import.meta.env
-                .VITE_SUBSCRIPTION_PRICE
-            ) || 499
-          }
-          currency="INR"
+          amount={status?.plan?.amount || 499}
+          currency={status?.plan?.currency || "INR"}
           loading={paymentLoading}
           onSubscribe={handleSubscribe}
         />

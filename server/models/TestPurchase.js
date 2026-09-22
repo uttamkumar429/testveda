@@ -37,8 +37,9 @@ const testPurchaseSchema = new mongoose.Schema(
 
     razorpayOrderId: {
       type: String,
-      required: true,
+      default: null,
       unique: true,
+      sparse: true,
       index: true,
     },
 
@@ -46,6 +47,17 @@ const testPurchaseSchema = new mongoose.Schema(
       type: String,
       default: null,
       index: true,
+    },
+
+    failureReason: {
+      type: String,
+      default: null,
+      maxlength: 500,
+    },
+
+    orderCreationLockUntil: {
+      type: Date,
+      default: null,
     },
   },
   { timestamps: true }

@@ -6,6 +6,7 @@ const {
   createSubscriptionOrder,
   verifySubscriptionPayment,
   getSubscriptionStatus,
+  processRazorpayWebhook,
 } = require("../services/payment.service");
 
 exports.createOrder = asyncHandler(async (req, res) => {
@@ -40,9 +41,6 @@ exports.verify = asyncHandler(async (req, res) => {
     result
   );
 });
-// =====================================
-// CREATE SUBSCRIPTION ORDER
-// =====================================
 
 exports.createSubscriptionOrder = asyncHandler(async (req, res) => {
   const result = await createSubscriptionOrder(req.user._id);
@@ -54,10 +52,6 @@ exports.createSubscriptionOrder = asyncHandler(async (req, res) => {
     result
   );
 });
-
-// =====================================
-// VERIFY SUBSCRIPTION PAYMENT
-// =====================================
 
 exports.verifySubscription = asyncHandler(async (req, res) => {
   const result = await verifySubscriptionPayment(
@@ -75,10 +69,6 @@ exports.verifySubscription = asyncHandler(async (req, res) => {
   );
 });
 
-// =====================================
-// SUBSCRIPTION STATUS
-// =====================================
-
 exports.getSubscriptionStatus = asyncHandler(async (req, res) => {
   const result = await getSubscriptionStatus(req.user._id);
 
@@ -88,4 +78,20 @@ exports.getSubscriptionStatus = asyncHandler(async (req, res) => {
     "Subscription status fetched successfully.",
     result
   );
+});
+
+exports.webhook = asyncHandler(async (req, res) => {
+  const result = await processRazorpayWebhook(
+    req.rawBody,
+    req.headers["x-razorpay-signature"],
+    req.headers["x-razorpay-event-id"],
+    req.body?.event,
+    req.body?.payload
+  );
+
+  return res.status(200).json({
+    success: true,
+    received: true,
+    ...result,
+  });
 });

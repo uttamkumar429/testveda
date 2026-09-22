@@ -60,7 +60,18 @@ app.use(cors(corsOptions));
 
 app.use(helmet());
 
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, res, buffer) => {
+      if (
+        req.originalUrl ===
+        "/api/student/payments/webhook"
+      ) {
+        req.rawBody = Buffer.from(buffer);
+      }
+    },
+  })
+);
 
 app.use(
   express.urlencoded({

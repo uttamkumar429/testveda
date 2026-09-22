@@ -2,20 +2,12 @@ const mongoose = require("mongoose");
 
 const subscriptionSchema = new mongoose.Schema(
   {
-    // =========================================
-    // STUDENT
-    // =========================================
-
     student: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
       index: true,
     },
-
-    // =========================================
-    // PLAN
-    // =========================================
 
     plan: {
       type: String,
@@ -24,10 +16,6 @@ const subscriptionSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-
-    // =========================================
-    // PAYMENT
-    // =========================================
 
     amount: {
       type: Number,
@@ -43,10 +31,6 @@ const subscriptionSchema = new mongoose.Schema(
       default: "INR",
     },
 
-    // =========================================
-    // STATUS
-    // =========================================
-
     status: {
       type: String,
       enum: [
@@ -54,15 +38,12 @@ const subscriptionSchema = new mongoose.Schema(
         "ACTIVE",
         "EXPIRED",
         "CANCELLED",
+        "FAILED",
       ],
       default: "PENDING",
       required: true,
       index: true,
     },
-
-    // =========================================
-    // SUBSCRIPTION PERIOD
-    // =========================================
 
     startDate: {
       type: Date,
@@ -76,27 +57,40 @@ const subscriptionSchema = new mongoose.Schema(
       index: true,
     },
 
-    // =========================================
-    // RAZORPAY
-    // =========================================
+    pendingKey: {
+      type: String,
+      default: null,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
 
     razorpayOrderId: {
       type: String,
-      trim: true,
-      index: true,
+      default: null,
+      unique: true,
       sparse: true,
+      index: true,
     },
 
     razorpayPaymentId: {
       type: String,
-      trim: true,
-      index: true,
+      default: null,
+      unique: true,
       sparse: true,
+      index: true,
     },
 
-    // =========================================
-    // AUDIT
-    // =========================================
+    failureReason: {
+      type: String,
+      default: null,
+      maxlength: 500,
+    },
+
+    orderCreationLockUntil: {
+      type: Date,
+      default: null,
+    },
 
     activatedAt: {
       type: Date,
@@ -113,32 +107,16 @@ const subscriptionSchema = new mongoose.Schema(
   }
 );
 
-// =========================================
-// ACTIVE SUBSCRIPTION LOOKUP
-// =========================================
-
 subscriptionSchema.index({
   student: 1,
   status: 1,
   endDate: -1,
 });
 
-// =========================================
-// RAZORPAY ORDER LOOKUP
-// =========================================
-
 subscriptionSchema.index({
-  razorpayOrderId: 1,
   student: 1,
-});
-
-// =========================================
-// RAZORPAY PAYMENT LOOKUP
-// =========================================
-
-subscriptionSchema.index({
-  razorpayPaymentId: 1,
-  student: 1,
+  status: 1,
+  createdAt: -1,
 });
 
 module.exports = mongoose.model(

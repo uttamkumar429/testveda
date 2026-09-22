@@ -28,6 +28,13 @@ const apiLimiter = rateLimit({
       return true;
     }
 
+    if (
+      req.originalUrl ===
+      "/api/student/payments/webhook"
+    ) {
+      return true;
+    }
+
     return false;
   },
 

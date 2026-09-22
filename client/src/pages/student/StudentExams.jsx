@@ -83,8 +83,8 @@ function StudentExams() {
 
     try {
       setPaymentExamId(exam._id);
-      await loadRazorpay();
 
+      // Create the server-side order first.
       const response = await paymentService.createOrder(exam._id);
       const data = response?.data;
 
@@ -93,9 +93,28 @@ function StudentExams() {
         return;
       }
 
+      if (data?.mock) {
+        await paymentService.verify({
+          snapshotId: exam._id,
+          razorpay_order_id: data.orderId,
+          razorpay_payment_id: `mock_payment_${Date.now()}`,
+          razorpay_signature: "mock_signature",
+        });
+
+        toast.success("Payment successful. Test unlocked.");
+        navigate("/student/exam/instructions", {
+          state: { exam: { ...exam, isPurchased: true } },
+        });
+        return;
+      }
+
+       
+
       if (!data?.keyId || !data?.orderId) {
         throw new Error("Payment order could not be created.");
       }
+
+      await loadRazorpay();
 
       await new Promise((resolve, reject) => {
         const checkout = new window.Razorpay({
