@@ -7,45 +7,32 @@ const snapshotQuestionSchema = new mongoose.Schema(
       ref: "Question",
       required: true,
     },
-
     subject: String,
-
     chapter: String,
-
     difficulty: String,
-
     question: String,
-
     optionA: String,
-
     optionB: String,
-
     optionC: String,
-
     optionD: String,
-
     correctAnswer: String,
-
     explanation: String,
-        // =====================================
-    // HINDI TRANSLATION
-    // =====================================
 
+    // Hindi content - manually entered
     questionHindi: String,
-
     optionAHindi: String,
-
     optionBHindi: String,
-
     optionCHindi: String,
-
     optionDHindi: String,
-
     explanationHindi: String,
 
     marks: Number,
-  },
-  
+    negativeMarks: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+  }
 );
 
 const testSnapshotSchema = new mongoose.Schema(
@@ -56,21 +43,10 @@ const testSnapshotSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
-
     title: String,
-
     subject: String,
-
-    isPaid: {
-      type: Boolean,
-      default: false,
-    },
-
-    price: {
-      type: Number,
-      default: 0,
-    },
-
+    isPaid: { type: Boolean, default: false },
+    price: { type: Number, default: 0 },
     materials: [
       {
         title: { type: String, required: true, trim: true },
@@ -81,30 +57,15 @@ const testSnapshotSchema = new mongoose.Schema(
         resourceType: { type: String, default: "raw" },
       },
     ],
-
     duration: Number,
-
     totalMarks: Number,
-
     totalQuestions: Number,
-
     startTime: Date,
-
     endTime: Date,
-
-    publishedAt: {
-      type: Date,
-      default: Date.now,
-    },
-
+    publishedAt: { type: Date, default: Date.now },
     questions: [snapshotQuestionSchema],
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-module.exports = mongoose.model(
-  "TestSnapshot",
-  testSnapshotSchema
-);
+module.exports = mongoose.model("TestSnapshot", testSnapshotSchema);

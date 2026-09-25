@@ -3,9 +3,7 @@ const mongoose = require("mongoose");
 const Question = require("../models/Question");
 const Test = require("../models/Test");
 const ApiError = require("../utils/ApiError");
-const {
-  enqueueQuestionTranslation,
-} = require("./translationJob.service");
+
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
@@ -51,27 +49,47 @@ const buildSearchRegex = (search) => {
 const normalizeQuestionData = (data = {}) => ({
   subject: normalizeString(data.subject),
   chapter: normalizeString(data.chapter),
+
+  // English
   question: normalizeString(data.question),
   optionA: normalizeString(data.optionA),
   optionB: normalizeString(data.optionB),
   optionC: normalizeString(data.optionC),
   optionD: normalizeString(data.optionD),
+  explanation: normalizeString(data.explanation),
+
+  // Hindi - manually entered by admin
+  questionHindi: normalizeString(data.questionHindi),
+  optionAHindi: normalizeString(data.optionAHindi),
+  optionBHindi: normalizeString(data.optionBHindi),
+  optionCHindi: normalizeString(data.optionCHindi),
+  optionDHindi: normalizeString(data.optionDHindi),
+  explanationHindi: normalizeString(data.explanationHindi),
+
   correctAnswer: normalizeString(data.correctAnswer).toUpperCase(),
   difficulty: normalizeString(data.difficulty, "Medium"),
   marks: Number(data.marks),
-  explanation: normalizeString(data.explanation),
 });
 
 const assertValidQuestionData = (data) => {
-  const requiredStrings = [
-    ["subject", data.subject],
-    ["chapter", data.chapter],
-    ["question", data.question],
-    ["optionA", data.optionA],
-    ["optionB", data.optionB],
-    ["optionC", data.optionC],
-    ["optionD", data.optionD],
-  ];
+const requiredStrings = [
+  ["subject", data.subject],
+  ["chapter", data.chapter],
+
+  // English
+  ["question", data.question],
+  ["optionA", data.optionA],
+  ["optionB", data.optionB],
+  ["optionC", data.optionC],
+  ["optionD", data.optionD],
+
+  // Hindi - manually entered by admin
+  ["questionHindi", data.questionHindi],
+  ["optionAHindi", data.optionAHindi],
+  ["optionBHindi", data.optionBHindi],
+  ["optionCHindi", data.optionCHindi],
+  ["optionDHindi", data.optionDHindi],
+];
 
   const missing = requiredStrings.find(([, value]) => !value);
 
@@ -92,28 +110,6 @@ const assertValidQuestionData = (data) => {
   }
 };
 
-// =====================================
-// CREATE QUESTION
-// =====================================
-
-const isTranslationEnabled = () =>
-  process.env.TRANSLATION_ENABLED !== undefined
-    ? String(process.env.TRANSLATION_ENABLED).toLowerCase() !== "false"
-    : process.env.NODE_ENV !== "test";
-
-const enqueueTranslationSafely = async (questionId) => {
-  if (!isTranslationEnabled()) return;
-
-  try {
-    await enqueueQuestionTranslation(questionId);
-  } catch (error) {
-    console.error(
-      `[QuestionTranslation] Failed to enqueue translation job for ${questionId}: ${
-        error?.message || "Unknown error"
-      }`
-    );
-  }
-};
 
 // =====================================
 // CREATE QUESTION
@@ -127,11 +123,6 @@ const createQuestion = async (questionData) => {
   let createdQuestion;
 
   try {
-    /*
-     * Translation is deliberately NOT part of the HTTP request.
-     * The core question is persisted first. A durable MongoDB job
-     * handles Hindi translation asynchronously.
-     */
     createdQuestion = await Question.create({
       ...normalized,
       createdBy: questionData.createdBy,
@@ -143,8 +134,6 @@ const createQuestion = async (questionData) => {
 
     throw error;
   }
-
-  await enqueueTranslationSafely(createdQuestion._id);
 
   return createdQuestion;
 };
@@ -337,22 +326,7 @@ const updateQuestion = async (id, questionData = {}) => {
 
   assertValidQuestionData(normalized);
 
-  const translatableFieldsChanged = [
-    "question",
-    "optionA",
-    "optionB",
-    "optionC",
-    "optionD",
-    "explanation",
-  ].some(
-    (field) =>
-      Object.prototype.hasOwnProperty.call(
-        questionData,
-        field
-      ) &&
-      normalizeString(existing[field]) !==
-        normalizeString(questionData[field])
-  );
+
 
   const updateData = {
     ...normalized,
@@ -363,17 +337,14 @@ const updateQuestion = async (id, questionData = {}) => {
   let updated;
 
   try {
-    /*
-     * Core question update is independent of translation.
-     * No external translation provider is called here.
-     */
+
     updated = await Question.findByIdAndUpdate(
       id,
       {
         $set: updateData,
       },
       {
-        new: true,
+        returnDocument: "after",
         runValidators: true,
         context: "query",
       }
@@ -392,9 +363,7 @@ const updateQuestion = async (id, questionData = {}) => {
     return null;
   }
 
-  if (translatableFieldsChanged) {
-    await enqueueTranslationSafely(id);
-  }
+
 
   return updated;
 };

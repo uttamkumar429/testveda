@@ -1,186 +1,82 @@
 const validateQuestion = (data) => {
   const errors = [];
 
-  // =====================================
-  // SUBJECT
-  // =====================================
-
-  if (
-    typeof data.subject !== "string" ||
-    data.subject.trim() === ""
-  ) {
-    errors.push(
-      "Subject is required."
-    );
-  } else if (
-    data.subject.trim().length > 100
-  ) {
-    errors.push(
-      "Subject cannot exceed 100 characters."
-    );
-  }
-
-  // =====================================
-  // CHAPTER
-  // =====================================
-
-  if (
-    typeof data.chapter !== "string" ||
-    data.chapter.trim() === ""
-  ) {
-    errors.push(
-      "Chapter is required."
-    );
-  } else if (
-    data.chapter.trim().length > 150
-  ) {
-    errors.push(
-      "Chapter cannot exceed 150 characters."
-    );
-  }
-
-  // =====================================
-  // QUESTION
-  // =====================================
-
-  if (
-    typeof data.question !== "string" ||
-    data.question.trim() === ""
-  ) {
-    errors.push(
-      "Question is required."
-    );
-  } else if (
-    data.question.trim().length > 5000
-  ) {
-    errors.push(
-      "Question cannot exceed 5000 characters."
-    );
-  }
-
-  // =====================================
-  // OPTIONS
-  // =====================================
-
-  const options = [
-    "optionA",
-    "optionB",
-    "optionC",
-    "optionD",
-  ];
-
-  for (const option of options) {
-    if (
-      typeof data[option] !== "string" ||
-      data[option].trim() === ""
-    ) {
-      errors.push(
-        `${option.replace(
-          "option",
-          "Option "
-        )} is required.`
-      );
-    } else if (
-      data[option].trim().length > 2000
-    ) {
-      errors.push(
-        `${option.replace(
-          "option",
-          "Option "
-        )} cannot exceed 2000 characters.`
-      );
+  const requiredString = (field, label, maxLength) => {
+    if (typeof data[field] !== "string" || data[field].trim() === "") {
+      errors.push(`${label} is required.`);
+    } else if (data[field].trim().length > maxLength) {
+      errors.push(`${label} cannot exceed ${maxLength} characters.`);
     }
-  }
+  };
 
-  // =====================================
-  // CORRECT ANSWER
-  // =====================================
+  requiredString("subject", "Subject", 100);
+  requiredString("chapter", "Chapter", 150);
+  requiredString("question", "Question", 5000);
+  requiredString("questionHindi", "Hindi Question", 5000);
 
-  if (
-    !["A", "B", "C", "D"].includes(
-      data.correctAnswer
-    )
-  ) {
-    errors.push(
-      "Correct Answer must be A, B, C or D."
+  for (const option of ["A", "B", "C", "D"]) {
+    requiredString(`option${option}`, `Option ${option}`, 2000);
+    requiredString(
+      `option${option}Hindi`,
+      `Hindi Option ${option}`,
+      2000
     );
   }
 
-  // =====================================
-  // DIFFICULTY
-  // =====================================
+  if (!["A", "B", "C", "D"].includes(data.correctAnswer)) {
+    errors.push("Correct Answer must be A, B, C or D.");
+  }
 
   if (
     data.difficulty !== undefined &&
-    (
-      typeof data.difficulty !== "string" ||
-      ![
-        "Easy",
-        "Medium",
-        "Hard",
-      ].includes(
-        data.difficulty
-      )
-    )
+    (typeof data.difficulty !== "string" ||
+      !["Easy", "Medium", "Hard"].includes(data.difficulty))
   ) {
-    errors.push(
-      "Difficulty must be Easy, Medium or Hard."
-    );
+    errors.push("Difficulty must be Easy, Medium or Hard.");
   }
 
-  // =====================================
-  // MARKS
-  // =====================================
-
-  if (
-    data.marks === undefined ||
-    data.marks === null ||
-    data.marks === ""
-  ) {
-    errors.push(
-      "Marks are required."
-    );
+  if (data.marks === undefined || data.marks === null || data.marks === "") {
+    errors.push("Marks are required.");
   } else {
-    const numericMarks =
-      Number(data.marks);
-
-    if (
-      !Number.isFinite(
-        numericMarks
-      ) ||
-      numericMarks < 1
-    ) {
-      errors.push(
-        "Marks must be greater than or equal to 1."
-      );
-    } else if (
-      numericMarks > 100
-    ) {
-      errors.push(
-        "Marks cannot exceed 100."
-      );
+    const numericMarks = Number(data.marks);
+    if (!Number.isFinite(numericMarks) || numericMarks < 1) {
+      errors.push("Marks must be greater than or equal to 1.");
+    } else if (numericMarks > 100) {
+      errors.push("Marks cannot exceed 100.");
     }
   }
 
-  // =====================================
-  // EXPLANATION
-  // =====================================
-
   if (
-    data.explanation !== undefined &&
-    data.explanation !== null &&
-    typeof data.explanation !== "string"
+    data.negativeMarks === undefined ||
+    data.negativeMarks === null ||
+    data.negativeMarks === ""
   ) {
-    errors.push(
-      "Explanation must be a string."
-    );
-  } else if (
-    typeof data.explanation === "string" &&
-    data.explanation.trim().length > 5000
-  ) {
-    errors.push(
-      "Explanation cannot exceed 5000 characters."
-    );
+    errors.push("Negative Marks are required.");
+  } else {
+    const numericNegativeMarks = Number(data.negativeMarks);
+    if (!Number.isFinite(numericNegativeMarks) || numericNegativeMarks < 0) {
+      errors.push("Negative Marks must be greater than or equal to 0.");
+    } else if (numericNegativeMarks > 100) {
+      errors.push("Negative Marks cannot exceed 100.");
+    }
+  }
+
+  for (const [field, label] of [
+    ["explanation", "Explanation"],
+    ["explanationHindi", "Hindi Explanation"],
+  ]) {
+    if (
+      data[field] !== undefined &&
+      data[field] !== null &&
+      typeof data[field] !== "string"
+    ) {
+      errors.push(`${label} must be a string.`);
+    } else if (
+      typeof data[field] === "string" &&
+      data[field].trim().length > 5000
+    ) {
+      errors.push(`${label} cannot exceed 5000 characters.`);
+    }
   }
 
   return errors;

@@ -2,6 +2,7 @@ function ResultSummary({
   examTitle,
   subject,
   obtainedMarks,
+  negativeMarksDeducted = 0,
   totalMarks,
   percentage,
   status,
@@ -30,6 +31,22 @@ function ResultSummary({
           <p className="mt-3 text-2xl font-semibold text-gray-700">
             {Number(percentage ?? 0).toFixed(2)}%
           </p>
+
+          <div className="mx-auto mt-6 grid max-w-xl grid-cols-1 gap-3 text-left sm:grid-cols-2">
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-sm text-slate-500">Correct Marks</p>
+              <p className="mt-1 text-xl font-bold text-slate-900">
+                {(Number(obtainedMarks || 0) + Number(negativeMarksDeducted || 0)).toFixed(2)}
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-red-50 p-4">
+              <p className="text-sm text-red-600">Negative Marks Deducted</p>
+              <p className="mt-1 text-xl font-bold text-red-700">
+                -{Number(negativeMarksDeducted || 0).toFixed(2)}
+              </p>
+            </div>
+          </div>
 
           <span
             className={`mt-5 inline-flex rounded-full px-5 py-2 text-sm font-semibold ${

@@ -1,314 +1,273 @@
-const {
-  getAttemptDetails,
-} = require("./adminExam.service");
-const TestSnapshot = require("../models/TestSnapshot");
+const mongoose = require("mongoose");
 const PDFDocument = require("pdfkit");
-const ExamAttempt = require("../models/ExamAttempt");
 const ExcelJS = require("exceljs");
 
-// =====================================
-// STUDENT REPORT
-// =====================================
+const { getAttemptDetails } = require("./adminExam.service");
+const TestSnapshot = require("../models/TestSnapshot");
+const ExamAttempt = require("../models/ExamAttempt");
+const ApiError = require("../utils/ApiError");
+
+const EXPORT_STATUS = "SUBMITTED";
+const PASS_PERCENTAGE = 33;
+const EXCEL_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+const assertObjectId = (value, fieldName) => {
+  if (!mongoose.isValidObjectId(value)) {
+    throw new ApiError(400, `Invalid ${fieldName}.`);
+  }
+};
+
+const safeFilenamePart = (value) =>
+  String(value || "")
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80) || "report";
+
+/**
+ * Excel/CSV formula injection protection.
+ * Any user-controlled text beginning with a formula prefix is exported
+ * as literal text rather than an executable spreadsheet formula.
+ */
+const safeSpreadsheetText = (value) => {
+  if (value === null || value === undefined) return "";
+
+  const text = String(value);
+  return /^[=+\-@]/.test(text) ? `'${text}` : text;
+};
+
+const escapeCsv = (value) => {
+  const text = safeSpreadsheetText(value);
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+const formatIsoDate = (value) =>
+  value instanceof Date
+    ? value.toISOString()
+    : value
+      ? new Date(value).toISOString()
+      : "";
 
 const getStudentReport = async (attemptId) => {
+  assertObjectId(attemptId, "attempt ID");
 
-  /**
-   * Temporary Reuse
-   *
-   * Future:
-   * reportData.service.js
-   */
-
-  // Snapshot id find
-
-
-  const attempt = await ExamAttempt.findById(
-    attemptId
-  )
-  .select("testSnapshot")
-  .lean();
+  const attempt = await ExamAttempt.findById(attemptId)
+    .select("testSnapshot")
+    .lean();
 
   if (!attempt) {
-    throw new ApiError(
-      404,
-      "Exam attempt not found."
-    );
+    throw new ApiError(404, "Exam attempt not found.");
   }
 
-  return await getAttemptDetails(
+  return getAttemptDetails(
     attempt.testSnapshot.toString(),
     attemptId
   );
-
 };
-// =====================================
-// GENERATE PDF
-// =====================================
 
-const generateStudentReportPDF = async (
-  attemptId,
-  res
-) => {
-
-  const report =
-    await getStudentReport(attemptId);
+const generateStudentReportPDF = async (attemptId, res) => {
+  const report = await getStudentReport(attemptId);
 
   const doc = new PDFDocument({
-
     margin: 50,
-
     size: "A4",
-
+    info: {
+      Title: "Student Examination Report",
+      Author: "TestVeda",
+    },
   });
 
-  res.setHeader(
-    "Content-Type",
-    "application/pdf"
-  );
-
+  res.status(200);
+  res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
     "Content-Disposition",
-    `attachment; filename=student-report-${attemptId}.pdf`
+    `attachment; filename="student-report-${safeFilenamePart(attemptId)}.pdf"`
   );
+  res.setHeader("Cache-Control", "private, no-store");
+
+  doc.on("error", (error) => {
+    if (!res.headersSent) {
+      res.destroy(error);
+    } else {
+      res.destroy();
+    }
+  });
 
   doc.pipe(res);
 
-  // ---------------------------------
-  // HEADER
-  // ---------------------------------
-
-  doc
-    .fontSize(22)
-    .text("iRise Coaching Center", {
-      align: "center",
-    });
-
+  doc.fontSize(22).text("iRise Coaching Center", { align: "center" });
   doc.moveDown();
-
-  doc
-    .fontSize(16)
-    .text("Student Examination Report", {
-      align: "center",
-    });
-
+  doc.fontSize(16).text("Student Examination Report", { align: "center" });
   doc.moveDown(2);
-
-  // ---------------------------------
-  // STUDENT
-  // ---------------------------------
 
   doc.fontSize(14).text("Student Details");
-
   doc.moveDown(0.5);
-
   doc.fontSize(12);
-
-  doc.text(
-    `Name : ${report.student.fullName}`
-  );
-
-  doc.text(
-    `User ID : ${report.student.userId}`
-  );
-
-  doc.text(
-    `Email : ${report.student.email}`
-  );
-
+  doc.text(`Name : ${safeSpreadsheetText(report.student?.fullName)}`);
+  doc.text(`User ID : ${safeSpreadsheetText(report.student?.userId)}`);
+  doc.text(`Email : ${safeSpreadsheetText(report.student?.email)}`);
   doc.moveDown();
-
-  // ---------------------------------
-  // EXAM
-  // ---------------------------------
 
   doc.fontSize(14).text("Exam Details");
-
   doc.moveDown(0.5);
-
   doc.fontSize(12);
-
-  doc.text(
-    `Exam : ${report.exam.title}`
-  );
-
-  doc.text(
-    `Subject : ${report.exam.subject}`
-  );
-
+  doc.text(`Exam : ${safeSpreadsheetText(report.exam?.title)}`);
+  doc.text(`Subject : ${safeSpreadsheetText(report.exam?.subject)}`);
   doc.moveDown();
-
-  // ---------------------------------
-  // RESULT
-  // ---------------------------------
 
   doc.fontSize(14).text("Summary");
-
   doc.moveDown(0.5);
-
   doc.fontSize(12);
-
   doc.text(
-    `Marks : ${report.summary.obtainedMarks}/${report.summary.totalMarks}`
+    `Marks : ${report.summary?.obtainedMarks ?? 0}/${report.summary?.totalMarks ?? 0}`
   );
-
-  doc.text(
-    `Percentage : ${report.summary.percentage}%`
-  );
-
-  doc.text(
-    `Status : ${report.summary.status}`
-  );
-
-  doc.text(
-    `Time Taken : ${report.summary.timeTaken} Minutes`
-  );
-
+  doc.text(`Percentage : ${report.summary?.percentage ?? 0}%`);
+  doc.text(`Status : ${safeSpreadsheetText(report.summary?.status)}`);
+  doc.text(`Time Taken : ${report.summary?.timeTaken ?? 0} Minutes`);
   doc.moveDown(2);
 
-  // ---------------------------------
-  // QUESTIONS
-  // ---------------------------------
-
   doc.fontSize(16).text("Question Report");
-
   doc.moveDown();
 
-  report.questions.forEach(
-    (question, index) => {
-      if (doc.y > 720) {
-          doc.addPage();
-        }
-      doc
-        .fontSize(13)
-        .text(
-          `${index + 1}. ${question.question}`
-        );
+  for (const [index, question] of (report.questions || []).entries()) {
+    if (doc.y > 720) doc.addPage();
 
-      doc.moveDown(0.3);
+    doc
+      .fontSize(13)
+      .text(`${index + 1}. ${question.question || ""}`);
 
-      doc.text(
-        `Student Answer : ${
-          question.selectedAnswer || "-"
-        }`
-      );
-
-      doc.text(
-        `Correct Answer : ${question.correctAnswer}`
-      );
-
-      doc.text(
-        `Marks Awarded : ${question.marksAwarded}`
-      );
-
-      doc.moveDown();
-
-    }
-  );
+    doc.moveDown(0.3);
+    doc.fontSize(11);
+    doc.text(`Student Answer : ${question.selectedAnswer || "-"}`);
+    doc.text(`Correct Answer : ${question.correctAnswer || "-"}`);
+    doc.text(`Marks Awarded : ${question.marksAwarded ?? 0}`);
+    doc.moveDown();
+  }
 
   doc.end();
-
 };
-// =====================================
-// EXAM EXPORT DATA
-// =====================================
 
 const getExamExportData = async (snapshotId) => {
+  assertObjectId(snapshotId, "snapshot ID");
 
   const snapshot = await TestSnapshot.findById(snapshotId)
-    .select("title subject")
+    .select("_id title subject")
     .lean();
 
   if (!snapshot) {
-    throw new Error("Test snapshot not found.");
+    throw new ApiError(404, "Test snapshot not found.");
   }
 
   const attempts = await ExamAttempt.find({
     testSnapshot: snapshotId,
-    status: "submitted",
+    status: EXPORT_STATUS,
   })
-  .select(
-    "student obtainedMarks totalMarks percentage timeTaken submittedAt"
-  )
-  .populate({
-    path: "student",
-    select: "userId fullName email",
-  })
-  .sort({
-    obtainedMarks: -1,
-  })
-  .lean();
+    .select(
+      "student obtainedMarks totalMarks percentage timeTaken submittedAt"
+    )
+    .populate({
+      path: "student",
+      select: "userId fullName email",
+    })
+    .sort({ obtainedMarks: -1, submittedAt: 1, _id: 1 })
+    .lean();
 
-  return {
-    snapshot,
-    attempts,
-  };
-
+  return { snapshot, attempts };
 };
-// =====================================
-// EXPORT EXAM CSV
-// =====================================
+
+const toExportRow = (attempt) => ({
+  userId: safeSpreadsheetText(attempt.student?.userId),
+  fullName: safeSpreadsheetText(attempt.student?.fullName),
+  email: safeSpreadsheetText(attempt.student?.email),
+  marks: Number(attempt.obtainedMarks ?? 0),
+  totalMarks: Number(attempt.totalMarks ?? 0),
+  percentage: Number(attempt.percentage ?? 0),
+  status:
+    Number(attempt.percentage ?? 0) >= PASS_PERCENTAGE ? "Pass" : "Fail",
+  timeTaken: Number(attempt.timeTaken ?? 0),
+  submittedAt: formatIsoDate(attempt.submittedAt),
+});
 
 const exportExamCSV = async (snapshotId, res) => {
+  const { snapshot, attempts } = await getExamExportData(snapshotId);
 
-  const {
-  snapshot,
-  attempts,
-} = await getExamExportData(snapshotId);
-  // CSV Header
-  let csv =
-    "Student ID,Student Name,Email,Marks,Total Marks,Percentage,Status,Time Taken,Submitted At\n";
+  const filename = `exam-${safeFilenamePart(snapshot._id)}.csv`;
 
-  // CSV Rows
-  attempts.forEach((attempt) => {
-
-    csv += `${attempt.student?.userId || ""},`;
-
-    csv += `${attempt.student?.fullName || ""},`;
-
-    csv += `${attempt.student?.email || ""},`;
-
-    csv += `${attempt.obtainedMarks},`;
-
-    csv += `${attempt.totalMarks},`;
-
-    csv += `${attempt.percentage},`;
-
-    csv += `${attempt.percentage >= 33 ? "Pass" : "Fail"},`;
-
-    csv += `${attempt.timeTaken},`;
-
-    csv += `${
-      attempt.submittedAt
-        ? attempt.submittedAt.toISOString()
-        : ""
-    }\n`;
-
-  });
-
-  // Headers
-  res.setHeader(
-    "Content-Type",
-    "text/csv"
-  );
-
+  res.status(200);
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader(
     "Content-Disposition",
-    `attachment; filename=exam-${snapshotId}.csv`
+    `attachment; filename="${filename}"`
   );
+  res.setHeader("Cache-Control", "private, no-store");
 
-  return res.send(csv);
+  // UTF-8 BOM helps Excel correctly detect Unicode CSV files.
+  res.write("\uFEFF");
 
+  const headers = [
+    "Student ID",
+    "Student Name",
+    "Email",
+    "Marks",
+    "Total Marks",
+    "Percentage",
+    "Status",
+    "Time Taken",
+    "Submitted At",
+  ];
+
+  res.write(`${headers.map(escapeCsv).join(",")}\r\n`);
+
+  for (const attempt of attempts) {
+    const row = toExportRow(attempt);
+    const values = [
+      row.userId,
+      row.fullName,
+      row.email,
+      row.marks,
+      row.totalMarks,
+      row.percentage,
+      row.status,
+      row.timeTaken,
+      row.submittedAt,
+    ];
+
+    res.write(`${values.map(escapeCsv).join(",")}\r\n`);
+  }
+
+  res.end();
 };
-// =====================================
-// EXPORT EXAM EXCEL
-// =====================================
 
 const exportExamExcel = async (snapshotId, res) => {
+  assertObjectId(snapshotId, "snapshot ID");
 
-  const { snapshot, attempts } =
-    await getExamExportData(snapshotId);
+  const snapshot = await TestSnapshot.findById(snapshotId)
+    .select("_id title subject")
+    .lean();
 
-  const workbook = new ExcelJS.Workbook();
+  if (!snapshot) {
+    throw new ApiError(404, "Test snapshot not found.");
+  }
+
+  const filename = `exam-${safeFilenamePart(snapshot._id)}.xlsx`;
+
+  res.status(200);
+  res.setHeader("Content-Type", EXCEL_CONTENT_TYPE);
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${filename}"`
+  );
+  res.setHeader("Cache-Control", "private, no-store");
+
+  const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
+    stream: res,
+    useStyles: true,
+    useSharedStrings: true,
+  });
+
+  workbook.creator = "TestVeda";
+  workbook.created = new Date();
 
   const worksheet = workbook.addWorksheet("Exam Results");
 
@@ -324,60 +283,44 @@ const exportExamExcel = async (snapshotId, res) => {
     { header: "Submitted At", key: "submittedAt", width: 30 },
   ];
 
-  attempts.forEach((attempt) => {
+  const headerRow = worksheet.getRow(1);
+  headerRow.font = { bold: true };
+  headerRow.alignment = { horizontal: "center", vertical: "middle" };
+  headerRow.commit();
 
-    worksheet.addRow({
+  const cursor = ExamAttempt.find({
+    testSnapshot: snapshotId,
+    status: EXPORT_STATUS,
+  })
+    .select(
+      "student obtainedMarks totalMarks percentage timeTaken submittedAt"
+    )
+    .populate({
+      path: "student",
+      select: "userId fullName email",
+    })
+    .sort({ obtainedMarks: -1, submittedAt: 1, _id: 1 })
+    .lean()
+    .cursor();
 
-      userId: attempt.student?.userId,
+  try {
+    for await (const attempt of cursor) {
+      worksheet.addRow(toExportRow(attempt)).commit();
+    }
 
-      fullName: attempt.student?.fullName,
-
-      email: attempt.student?.email,
-
-      marks: attempt.obtainedMarks,
-
-      totalMarks: attempt.totalMarks,
-
-      percentage: attempt.percentage,
-
-      status:
-        attempt.percentage >= 33
-          ? "Pass"
-          : "Fail",
-
-      timeTaken: attempt.timeTaken,
-
-    submittedAt: attempt.submittedAt
-      ? attempt.submittedAt.toISOString()
-      : "",
-
-    });
-
-  });
-
-  // Header Style
-  worksheet.getRow(1).alignment = {
-    horizontal: "center",
-  };
-  res.setHeader(
-    "Content-Type",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  );
-
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename=exam-${snapshotId}.xlsx`
-  );
-
-  await workbook.xlsx.write(res);
-
-  res.end();
-
+    worksheet.commit();
+    await workbook.commit();
+  } catch (error) {
+    cursor.close?.().catch(() => {});
+    if (!res.destroyed) res.destroy(error);
+    throw error;
+  }
 };
 
 module.exports = {
   getStudentReport,
   generateStudentReportPDF,
+  getExamExportData,
   exportExamCSV,
   exportExamExcel,
 };

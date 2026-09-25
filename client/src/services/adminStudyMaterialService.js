@@ -17,7 +17,12 @@ const adminStudyMaterialService = {
   ) => {
     return api.post(
       "/admin/study-materials",
-      formData
+      formData,
+      {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      }
     );
   },
 

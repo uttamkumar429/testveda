@@ -19,10 +19,7 @@ const {
 } = require("./systemSetting.service");
 const notificationService =
   require("./notification.service");
-  const {
-  translateExamQuestions,
-} = require("./translation.service");
-// ==========================================
+  // ==========================================
 // STUDENT DASHBOARD
 // ==========================================
 const getDashboard = async (studentId) => {
@@ -995,6 +992,7 @@ for (const answer of savedAnswers) {
       question.questionImage || null,
 
     marks: question.marks,
+    negativeMarks: Number(question.negativeMarks || 0),
   })
 );
   // -------------------------------------
@@ -1204,9 +1202,20 @@ const isCorrect =
   question.correctAnswer ===
     selectedAnswer;
 
-const marksAwarded =
-  isCorrect
-    ? Number(question.marks || 0)
+const positiveMarks = Number(question.marks || 0);
+const configuredNegativeMarks = Number(
+  question.negativeMarks || 0
+);
+
+const marksAwarded = isCorrect
+  ? positiveMarks
+  : isAnswered
+    ? -configuredNegativeMarks
+    : 0;
+
+const negativeMarksAwarded =
+  !isCorrect && isAnswered
+    ? configuredNegativeMarks
     : 0;
 
   // --------------------------------------
@@ -1235,6 +1244,7 @@ const safeTimeSpent = Math.max(
             question.correctAnswer,
           isCorrect,
           marksAwarded,
+          negativeMarksAwarded,
           answeredAt:
             selectedAnswer !== null
               ? new Date()
@@ -1761,7 +1771,7 @@ if (attempt.status !== "IN-PROGRESS") {
     attempt: attempt._id,
   })
     .select(
-      "selectedAnswer isCorrect marksAwarded"
+      "selectedAnswer isCorrect marksAwarded negativeMarksAwarded"
     )
     .lean();
 
@@ -1770,12 +1780,17 @@ if (attempt.status !== "IN-PROGRESS") {
   // --------------------------------------
 
   let obtainedMarks = 0;
+  let negativeMarksDeducted = 0;
   let correctAnswers = 0;
   let wrongAnswers = 0;
 
   for (const answer of answers) {
     obtainedMarks += Number(
       answer.marksAwarded || 0
+    );
+
+    negativeMarksDeducted += Number(
+      answer.negativeMarksAwarded || 0
     );
 
     if (answer.isCorrect === true) {
@@ -1884,6 +1899,7 @@ const submittedAttempt =
         wrongAnswers,
         unansweredQuestions,
         obtainedMarks,
+        negativeMarksDeducted,
         percentage,
         isPassed,
         timeTaken,
@@ -1959,6 +1975,7 @@ try {
     unansweredQuestions,
 
     obtainedMarks,
+    negativeMarksDeducted,
     totalMarks,
 
     percentage,
@@ -1993,6 +2010,7 @@ const getResult = async (
           "wrongAnswers",
           "unansweredQuestions",
           "obtainedMarks",
+          "negativeMarksDeducted",
           "percentage",
           "isPassed",
           "timeTaken",
@@ -2082,6 +2100,9 @@ const getResult = async (
 
     obtainedMarks:
       attempt.obtainedMarks,
+
+    negativeMarksDeducted:
+      attempt.negativeMarksDeducted || 0,
 
     totalMarks:
       attempt.totalMarks,
@@ -2228,7 +2249,7 @@ const getReviewAnswers = async (
       attempt: attemptId,
     })
     .select(
-      "questionId selectedAnswer isCorrect marksAwarded timeSpent"
+      "questionId selectedAnswer isCorrect marksAwarded negativeMarksAwarded timeSpent"
     )
       .lean();
 
@@ -2335,6 +2356,10 @@ const reviewQuestions =
 
         marksAwarded:
           studentAnswer?.marksAwarded ??
+          0,
+
+        negativeMarksAwarded:
+          studentAnswer?.negativeMarksAwarded ??
           0,
 
         timeSpent:

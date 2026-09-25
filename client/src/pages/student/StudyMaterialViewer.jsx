@@ -38,14 +38,21 @@ function StudyMaterialViewer() {
     setError,
   ] = useState("");
 
+  const [
+    pdfUrl,
+    setPdfUrl,
+  ] = useState("");
+
   useEffect(() => {
     let active = true;
+    let objectUrl = "";
 
     const loadMaterial =
       async () => {
         try {
           setLoading(true);
           setError("");
+          setPdfUrl("");
 
           const response =
             await studyMaterialService.getMaterialById(
@@ -56,10 +63,44 @@ function StudyMaterialViewer() {
             return;
           }
 
-          setMaterial(
+          const materialData =
             response?.data?.data ||
-              null
-          );
+            null;
+
+          if (!materialData?.viewerUrl) {
+            throw new Error(
+              "Study material PDF URL is unavailable."
+            );
+          }
+
+          const pdfResponse =
+            await fetch(
+              materialData.viewerUrl
+            );
+
+          if (!pdfResponse.ok) {
+            throw new Error(
+              "Unable to load the study material PDF."
+            );
+          }
+
+          const pdfBlob =
+            new Blob(
+              [await pdfResponse.arrayBuffer()],
+              { type: "application/pdf" }
+            );
+
+          objectUrl =
+            URL.createObjectURL(pdfBlob);
+
+          if (!active) {
+            URL.revokeObjectURL(objectUrl);
+            objectUrl = "";
+            return;
+          }
+
+          setMaterial(materialData);
+          setPdfUrl(objectUrl);
         } catch (requestError) {
           console.error(
             "Study material open failed:",
@@ -73,6 +114,7 @@ function StudyMaterialViewer() {
           const message =
             requestError?.response
               ?.data?.message ||
+            requestError?.message ||
             "Unable to open study material.";
 
           setError(message);
@@ -98,6 +140,10 @@ function StudyMaterialViewer() {
 
     return () => {
       active = false;
+
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
     };
   }, [id]);
 
@@ -108,12 +154,12 @@ function StudyMaterialViewer() {
   };
 
   const handleDownload = () => {
-    if (!material?.viewerUrl) {
+    if (!pdfUrl) {
       return;
     }
 
     window.open(
-      material.viewerUrl,
+      pdfUrl,
       "_blank",
       "noopener,noreferrer"
     );
@@ -214,7 +260,7 @@ function StudyMaterialViewer() {
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-200 shadow-sm dark:border-slate-800 dark:bg-slate-800">
         <iframe
           title={material.title}
-          src={material.viewerUrl}
+          src={pdfUrl}
           className="h-[calc(100vh-220px)] min-h-[650px] w-full bg-white"
         />
       </div>

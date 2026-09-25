@@ -110,7 +110,21 @@ const publishTest = async (testId) => {
 
       explanation: q.explanation,
 
+      questionHindi: q.questionHindi,
+
+      optionAHindi: q.optionAHindi,
+
+      optionBHindi: q.optionBHindi,
+
+      optionCHindi: q.optionCHindi,
+
+      optionDHindi: q.optionDHindi,
+
+      explanationHindi: q.explanationHindi,
+
       marks: q.marks,
+
+      negativeMarks: Number(q.negativeMarks ?? 0),
 
     })),
   });

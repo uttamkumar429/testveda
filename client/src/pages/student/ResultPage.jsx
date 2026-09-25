@@ -93,6 +93,7 @@ const {
   examTitle,
   subject,
   obtainedMarks,
+  negativeMarksDeducted,
   totalMarks,
   percentage,
   correctAnswers,
@@ -111,6 +112,7 @@ const {
           examTitle={examTitle}
           subject={subject}
           obtainedMarks={obtainedMarks}
+          negativeMarksDeducted={negativeMarksDeducted}
           totalMarks={totalMarks}
           percentage={percentage}
           status={status}
@@ -120,6 +122,7 @@ const {
           correctAnswers={correctAnswers}
           wrongAnswers={wrongAnswers}
           skippedAnswers={skippedAnswers}
+          negativeMarksDeducted={negativeMarksDeducted}
           timeTaken={timeTaken}
           submittedAt={submittedAt}
         />
